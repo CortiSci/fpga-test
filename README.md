@@ -74,7 +74,7 @@ in ad-hoc scripts: `subprocess` with `text=True` decodes vvp output in the
 pass `encoding="utf-8"`; and the OSS CAD Suite's `bin/` must be *appended* to
 PATH, or its bundled `python.exe` shadows the system interpreter.
 
-Verdict is regression-vs-baseline (`ci/baseline.json` in the design repo), not
+Verdict is regression-vs-baseline (`.github/workflows/baseline.json` in the design repo), not
 all-green — see that file's `_comment` and the CLAUDE.md section "Test suite".
 
 ## Test levels — and which to prefer
