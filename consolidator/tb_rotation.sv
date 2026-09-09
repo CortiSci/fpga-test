@@ -221,6 +221,11 @@ module tb_rotation;
         $display("tb_rotation: %0d passed, %0d failed", n_pass, n_fail);
         if (n_fail == 0) $display("TB_ROTATION: ALL TESTS PASSED");
         else             $display("TB_ROTATION: FAILURES PRESENT");
+        // Result-contract sentinel (result_contract.py): an explicit STATUS
+        // line is what lets a runner score this bench without the legacy
+        // "[tag] PASS evidence" fallback.
+        $display("RESULTS: %0d passed, %0d failed", n_pass, n_fail);
+        $display("STATUS: %0s", (n_fail == 0) ? "PASS" : "FAIL");
         $finish;
     end
 
