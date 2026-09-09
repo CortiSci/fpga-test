@@ -19,12 +19,15 @@ set DEFINES "+define+RUN_SPI_PING"
 if {$USE_PLL_STUB} { append DEFINES " +define+USE_PLL_STUB" }
 
 set REPO_ROOT    "C:/cortisci/IONM-A/IONM-A-FPGA"
+# Benches, models and tasks live in the fpga-test submodule (mirrors the
+# design repo layout).  RTL stays under REPO_ROOT.
+set TEST_ROOT    "$REPO_ROOT/fpga-test"
 set PROJ_ROOT    "$REPO_ROOT/consolidator_v2"
 set SCRIPT_DIR   "$PROJ_ROOT/scripts"
-set SIM_DIR      "$PROJ_ROOT/src/sim"
+set SIM_DIR      "$TEST_ROOT/consolidator_v2/src/sim"
 set RTL_CON      "$PROJ_ROOT/src/rtl"
-set SIM_MODELS   "$REPO_ROOT/common/src/sim/models"
-set SIM_TASKS    "$REPO_ROOT/common/src/sim/tasks"
+set SIM_MODELS   "$TEST_ROOT/common/src/sim/models"
+set SIM_TASKS    "$TEST_ROOT/common/src/sim/tasks"
 set RTL_TAIL     "$REPO_ROOT/tail_fpga_small/src/rtl"
 
 puts "REPO_ROOT    : $REPO_ROOT"

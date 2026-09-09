@@ -24,13 +24,16 @@
 
 # ---- Path declarations -------------------------------------------------------
 set REPO_ROOT  "C:/cortisci/IONM-A/IONM-A-FPGA"
+# Benches, models and tasks live in the fpga-test submodule (mirrors the
+# design repo layout).  RTL stays under REPO_ROOT.
+set TEST_ROOT  "$REPO_ROOT/fpga-test"
 set TAIL_ROOT  "$REPO_ROOT/tail_fpga_small"
 set RTL_DIR    "$TAIL_ROOT/src/rtl"
-set SIM_DIR    "$TAIL_ROOT/src/sim"
+set SIM_DIR    "$TEST_ROOT/tail_fpga_small/src/sim"
 set SCRIPT_DIR "$TAIL_ROOT/scripts"
 
 # Shared stubs and models from common/
-set SIM_MODELS "$REPO_ROOT/common/src/sim/models"
+set SIM_MODELS "$TEST_ROOT/common/src/sim/models"
 
 puts "TAIL_ROOT  : $TAIL_ROOT"
 puts "RTL_DIR    : $RTL_DIR"
