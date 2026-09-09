@@ -1,0 +1,19 @@
+# QuestaSim / ModelSim
+work/
+work_*/
+transcript
+vsim.wlf
+wlf*
+*.mpf
+*.cr.mti
+*.ucdb
+
+# Icarus / Verilator
+*.vvp
+obj_dir/
+*.vcd
+*.fst
+
+# Coverage / reports
+coverage_html/
+*.log
