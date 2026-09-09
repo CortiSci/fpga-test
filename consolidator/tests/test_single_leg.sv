@@ -69,6 +69,20 @@ task automatic run_SA_SINGLE_LEG_ACED();
         $error("[SA-SINGLE-LEG] active-leg phase %0d, expected 0", phase[0] & 16'h03FF);
         n_fail = n_fail + 1;
     end
+    if (n_fail != 0) begin
+        // Diagnostic: the first two groups received vs expected, as one bit per
+        // tick (plane FFFF -> 1, 0000 -> 0, anything else -> x), so a rotation
+        // reads directly as a shift of the ACED pattern.  Plus the phase word.
+        $display("[SA-SINGLE-LEG] phase word ch0 = 0x%04h", phase[0]);
+        for (i = 0; i < 32; i = i + 16) begin
+            $write("[SA-SINGLE-LEG] ticks %2d..%2d  got ", i, i + 15);
+            for (int j = 0; j < 16; j++)
+                $write("%s", data[4*(i+j)] === 16'hFFFF ? "1" : data[4*(i+j)] === 16'h0000 ? "0" : "x");
+            $write("  expected ");
+            for (int j = 0; j < 16; j++) $write("%0d", EXPECTED[15 - ((i + j) % 16)]);
+            $display("");
+        end
+    end
     if (n_fail != 0) $fatal(1, "[SA-SINGLE-LEG] FAIL: %0d checks failed", n_fail);
     $display("[SA-SINGLE-LEG] PASS: %0d V3 lane-slot checks through one real Tail", n_pass);
 endtask
