@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """Differential test: SW behavioural emulator vs RTL (Verilator) emulator.
 
-Stream the SAME sample file through ionm_emulator.exe (pure C++ model) and
-ionm_emu_rtl.exe (Verilator-compiled consolidator_v2 + 4x tail_fpga_small), drive
-both with the SAME host command sequence, decode what comes out of each with the
-SAME parser, and report where they differ.  The purpose is to verify that the
-software emulator behaves like the RTL — not to verify the RTL itself.
+Stream the SAME sample file (and the SAME impedance file) through
+ionm_emulator.exe (pure C++ model) and ionm_emu_rtl.exe (Verilator-compiled
+consolidator_v2 + 4x tail_fpga_small), drive both with the SAME host command
+sequence, decode what comes out of each with the SAME parser, and report where
+they differ.  The purpose is to verify that the software emulator behaves like
+the RTL — not to verify the RTL itself.
 
 Why this is a host program and not an Icarus/Verilator bench
 ------------------------------------------------------------
@@ -25,24 +26,31 @@ Both processes speak the same protocol, so no shim DLL is involved:
     command  = {0xAA55, flags(1=write), addr, data}   response = {0x55AA, flags, addr, rdata}
     words are native little-endian uint16 (usb_acq_pipeline.cpp raw_send casts the array).
 
+Legs
+----
+  normal    TELEM_EN=0x01.  Each side must deliver the -f file.
+  imp_even  TELEM_EN=0x02.  Each side must deliver the -if file on the even SD
+  imp_odd   TELEM_EN=0x03.  lanes / odd lanes, in the tail's impedance packing
+            (impedance_mode_spec.md: one word per pair of 5.12 MHz ticks,
+            output[2k] = lane[k]@T0, output[2k+1] = lane[k]@T1; 512 words per
+            sweep, two sweeps per 1024-word consolidator frame).
+
+Both files are always given to both emulators, so a side that reads the wrong
+file in a mode is caught (the SW ASIC BFM used to switch to -if whenever it was
+merely OPEN; the RTL harness used to ignore -if entirely — both fixed 2026-09-09).
+
 What is compared — three layers
 -------------------------------
   structural  frame length 4105, tag 0x0001, counter words, phase-word shape,
-              CRC-32 validity, counter monotonic.  Per emulator; a DIFF is when
-              one side passes a check the other fails.
+              CRC-32 validity, counter monotonic, phase-reporting style.  Per
+              emulator; a DIFF is when one side passes a check the other fails.
   recovered   the electrode image the host recovers from each side after that
               side's DOCUMENTED mapping (contract §7 transpose + de-rotation, then
               the SW emulator's SubQv3 electrode map).  Equal images = the host
-              cannot tell the emulators apart.  This is the test.
-  raw         the un-remapped sensor array — informational: shows the SubQv3
-              remap category directly.
-
-Impedance is exercised MODE-based, the way the bringup tool does it: same file,
-tails commanded to TELEM_EN=0x02 (even SD lanes) then 0x03 (odd lanes) over the
-real SPI_CFG path.  (The RTL harness opens `-if` but never reads it —
-RtlFileManager::impedance_value has no caller — so an `-if`-driven comparison
-would not be a comparison of the two models.  `--imp-file` still runs it as a
-third, informational leg.)
+              cannot tell the emulators apart.  This is the test.  In impedance
+              legs the image covers the selected lanes only.
+  vs file     each side's recovered image against the file it should be showing
+              — tells the reader WHICH side to believe when they differ.
 
 Known divergences (known_divergences.json beside this file) turn an EXPECTED
 difference into a named row instead of a red verdict, the same way the sim suite
@@ -83,16 +91,20 @@ TELEM_WORDS, PHASE_IDX, CRC_IDX = 4105, 4099, 4103
 REG_SPI_ENABLE_MASK = 0x0002
 REG_SPI_CFG_DATA, REG_SPI_CFG_CTRL, REG_SPI_CFG_DATA2 = 0x0030, 0x0031, 0x0032
 REG_SPI_CFG_RD01, REG_SPI_CFG_RD23, REG_SPI_CFG_RD45 = 0x0034, 0x0035, 0x0036
-REG_FRAME_CNT_LO, REG_STREAM_STS, REG_SPI_CLK_DIV = 0x0056, 0x005C, 0x0060
+REG_SPI_CLK_DIV = 0x0060
 REG_ACQ_ALL_RUN = 0x0140
 SPI_GO, SPI_RW, N_BYTES_SHIFT = 0x0008, 0x0004, 5
 TAIL_PING, TAIL_CTRL, TAIL_TELEM_EN = 0xAA, 0x01, 0x02
 CTRL_RUN = 0x11            # RO_RSTn=1 + MCLK_EN=1
 N_SENSORS = 4096
 
-# --- sample-file pattern: invertible, so a decoded value names its source frame ---
-# value = file_frame * 4096 + sensor_index  (0..16383, positive int16).
+# --- file patterns: invertible, so a decoded value names its source frame ---
+# sample:    value = file_frame * 4096 + sensor_index          (0x0000..0x3FFF)
+# impedance: value = 0x4000 | file_frame * 4096 | sensor_index (0x4000..0x7FFF)
+# Both positive int16; the top nibble tells the two files apart on sight.
 N_FILE_FRAMES = 4
+IMP_TAG = 0x4000
+NOVAL = -1                 # placeholder for a sensor a leg does not carry
 
 
 # =============================================================================
@@ -265,7 +277,7 @@ class Host:
         assertions.  telem_mode is the TELEM_EN data byte: 1 normal, 2 imp-even,
         3 imp-odd.  The consolidator watchdog is deliberately left disabled so a
         slow (RTL) run cannot trip an 819 ms fault frame mid-capture."""
-        info = {"ping": [], "stream_sts": None}
+        info = {"ping": []}
         # 800 kHz config SPI before any tail command (reset default 25.6 MHz is
         # faster than the tail's 20.48 MHz MCLK and every command is dropped).
         self.p.write_reg(REG_SPI_CLK_DIV, 31, self.t, self.stray)
@@ -304,7 +316,6 @@ class Frame:
     phase_ok: bool
     crc_ok: bool
     phases: list[int]
-    sensors: list[int] = field(default_factory=list)      # ch*1024 + gg*16 + lane
 
     @staticmethod
     def parse(payload: bytes) -> "Frame":
@@ -312,33 +323,69 @@ class Frame:
         frame_cnt = w[1] | ((w[2] & 0x1FFF) << 16)
         phases = [w[PHASE_IDX + i] for i in range(4)]
         crc = (w[CRC_IDX] << 16) | w[CRC_IDX + 1]
-        f = Frame(words=w, frame_cnt=frame_cnt,
-                  tag_ok=(w[0] == 0x0001),
-                  cnt_hi_ok=((w[2] >> 13) == 0),
-                  # phase word = {1'b0, par, ovfl, undf, 2'b00, phase[9:0]}: bits [11:10] zero
-                  phase_ok=all((p & 0x0C00) == 0 for p in phases),
-                  crc_ok=(crc == crc32_ieee_bigendian_words(w[:CRC_IDX])),
-                  phases=phases)
-        f.sensors = decode_sensors(w, phases)
-        return f
+        return Frame(words=w, frame_cnt=frame_cnt,
+                     tag_ok=(w[0] == 0x0001),
+                     cnt_hi_ok=((w[2] >> 13) == 0),
+                     # phase word = {1'b0, par, ovfl, undf, 2'b00, phase[9:0]}: bits [11:10] zero
+                     phase_ok=all((p & 0x0C00) == 0 for p in phases),
+                     crc_ok=(crc == crc32_ieee_bigendian_words(w[:CRC_IDX])),
+                     phases=phases)
 
 
-def decode_sensors(w: list[int], phases: list[int]) -> list[int]:
-    """Contract §7 transpose with per-leg de-rotation (ionm_test reconstruct_asic_frame)."""
+def leg_words(w: list[int], ch: int, phase: int) -> list[int]:
+    """The 1024 words of one leg in TRUE sweep order: de-interleave, then undo
+    the group rotation the phase word reports (contract §4/§7)."""
+    pv = phase & 0x3FF
+    P = pv if pv <= 63 else 0
+    out = [0] * 1024
+    for group in range(64):
+        gg = (group + P) & 63
+        base = 3 + ch + 4 * 16 * group
+        for k in range(16):
+            out[16 * gg + k] = w[base + 4 * k]
+    return out
+
+
+def decode_normal(w: list[int], phases: list[int]) -> list[int]:
+    """Normal mode: 16 consecutive bit-planes -> one 16-bit sample per lane
+    (ionm_test reconstruct_asic_frame).  Returns sensors[ch*1024 + s*16 + lane]."""
     out = [0] * N_SENSORS
     for ch in range(4):
-        pv = phases[ch] & 0x3FF
-        P = pv if pv <= 63 else 0
-        base = 3 + ch
-        for group in range(64):
-            gg = (group + P) & 63
-            planes = [w[base + 4 * (16 * group + k)] for k in range(16)]
+        lw = leg_words(w, ch, phases[ch])
+        for s in range(64):
+            planes = lw[16 * s:16 * s + 16]
             for lane in range(16):
-                s = 0
+                v = 0
                 for k in range(16):
-                    s |= ((planes[k] >> lane) & 1) << (15 - k)
-                out[ch * 1024 + gg * 16 + lane] = s
+                    v |= ((planes[k] >> lane) & 1) << (15 - k)
+                out[ch * 1024 + s * 16 + lane] = v
     return out
+
+
+def decode_impedance(w: list[int], phases: list[int], sel: int) -> list[list[int]]:
+    """Impedance mode (impedance_mode_spec.md): word j of a 512-word sweep carries
+    sample s=j//8, tick pair p=j%8, for the 8 selected lanes 2k+sel:
+        bit[2k]   = sample bit (15-2p)      (T0)
+        bit[2k+1] = sample bit (15-2p-1)    (T1)
+    A 1024-word leg holds TWO consecutive sweeps.  Returns [sweep0, sweep1], each a
+    4096-array with the selected lanes filled and NOVAL elsewhere."""
+    sweeps = [[NOVAL] * N_SENSORS for _ in range(2)]
+    for ch in range(4):
+        lw = leg_words(w, ch, phases[ch])
+        for sw in range(2):
+            vals = [0] * 16
+            for s in range(64):
+                for k in range(8):
+                    vals[2 * k + sel] = 0
+                for p in range(8):
+                    word = lw[512 * sw + 8 * s + p]
+                    for k in range(8):
+                        vals[2 * k + sel] |= ((word >> (2 * k)) & 1) << (15 - 2 * p)
+                        vals[2 * k + sel] |= ((word >> (2 * k + 1)) & 1) << (15 - 2 * p - 1)
+                for k in range(8):
+                    lane = 2 * k + sel
+                    sweeps[sw][ch * 1024 + s * 16 + lane] = vals[lane]
+    return sweeps
 
 
 # =============================================================================
@@ -359,10 +406,10 @@ def load_elec_map(path: Path) -> list[list[int]] | None:
 
 def to_elec_image(sensors: list[int], cell: list[list[int]] | None) -> list[int]:
     """Sensor array -> 64x64 electrode image via the FORWARD SubQv3 map.  With no
-    map (identity model) the image IS the sensor array."""
+    map (identity model) the image IS the sensor array.  NOVAL travels along."""
     if cell is None:
         return list(sensors)
-    img = [0] * N_SENSORS
+    img = [NOVAL] * N_SENSORS
     for ch in range(4):
         row = cell[ch]
         base = ch * 1024
@@ -460,65 +507,88 @@ def structural(r: RunResult) -> dict:
         "phase_ok": all(f.phase_ok for f in fs),
         "crc_ok": all(f.crc_ok for f in fs),
         "monotonic": mono,
+        "frame_cnts": cnts,
         "phase_values": sorted({p & 0x3FF for f in fs for p in f.phases}),
         "phase_flags": sorted({(p >> 12) & 7 for f in fs for p in f.phases}),
     }
 
 
-def file_frame_of(values: list[int]) -> tuple[int | None, float]:
-    """Which source-file frame a decoded image came from, and how much of it agrees."""
+def file_frame_of(values: list[int], tag: int) -> tuple[int | None, float]:
+    """Which source-file frame a decoded image came from (majority vote over the
+    values that carry the expected tag nibble), and the agreeing fraction."""
     votes: dict[int, int] = {}
+    n = 0
     for v in values:
-        votes[v >> 12] = votes.get(v >> 12, 0) + 1
-    if not votes:
+        if v == NOVAL:
+            continue
+        n += 1
+        if (v & 0xC000) == tag:
+            ff = (v >> 12) & 0x3
+            votes[ff] = votes.get(ff, 0) + 1
+    if not votes or not n:
         return None, 0.0
-    ff, n = max(votes.items(), key=lambda kv: kv[1])
-    return ff, n / len(values)
+    ff, cnt = max(votes.items(), key=lambda kv: kv[1])
+    return ff, cnt / n
 
 
-def compare_images(a: list[int], b: list[int]) -> tuple[int, list[tuple[int, int, int]]]:
-    diffs = [(i, x, y) for i, (x, y) in enumerate(zip(a, b)) if x != y]
-    return len(diffs), diffs[:8]
+def expected_image(tag: int, ff: int) -> list[int]:
+    return [tag | (ff << 12) | i for i in range(N_SENSORS)]
 
 
-def classify(a_img: list[int], b_img: list[int], a_raw: list[int], b_raw: list[int]) -> str:
+def compare_defined(a: list[int], b: list[int]) -> tuple[int, int, list[tuple[int, int, int]]]:
+    """Compare where BOTH sides carry a value.  Returns (n_compared, n_diff, examples)."""
+    n = 0
+    diffs = []
+    for i, (x, y) in enumerate(zip(a, b)):
+        if x == NOVAL or y == NOVAL:
+            continue
+        n += 1
+        if x != y:
+            diffs.append((i, x, y))
+    return n, len(diffs), diffs[:6]
+
+
+def classify(a_img: list[int], b_img: list[int]) -> str:
     """Name the shape of a semantic difference so the report says WHAT diverged."""
-    if a_img == b_img:
-        return "identical"
-    if a_raw == b_raw:
-        return "raw sensor arrays identical; images differ only by the electrode remap"
-    consts = {}
-    for label, arr in (("a", b_img), ("b", a_img)):
-        s = set(arr)
-        if len(s) == 1:
-            consts[label] = next(iter(s))
-    if len(set(b_img)) == 1:
-        return f"side B is constant 0x{b_img[0]:04X}"
-    if len(set(a_img)) == 1:
-        return f"side A is constant 0x{a_img[0]:04X}"
-    # Same multiset of values in a different arrangement = an index/lane mapping difference.
-    if sorted(a_img) == sorted(b_img):
+    a = [v for v in a_img if v != NOVAL]
+    b = [v for v in b_img if v != NOVAL]
+    if len(set(b)) == 1:
+        return f"rtl side is constant 0x{b[0]:04X}"
+    if len(set(a)) == 1:
+        return f"sw side is constant 0x{a[0]:04X}"
+    ta = {(v & 0xC000) for v in a}
+    tb = {(v & 0xC000) for v in b}
+    if ta != tb:
+        name = {0x0000: "-f (sample) file", IMP_TAG: "-if (impedance) file"}
+        return (f"different FILES: sw shows {', '.join(name.get(t, hex(t)) for t in ta)}; "
+                f"rtl shows {', '.join(name.get(t, hex(t)) for t in tb)}")
+    if sorted(a) == sorted(b):
         return "same values, different positions (index/lane mapping)"
     return "different values"
 
 
-def make_pattern_file(path: Path) -> None:
-    with path.open("wb") as f:
+def make_pattern_files(dat: Path, imp: Path) -> None:
+    with dat.open("wb") as f:
         for ff in range(N_FILE_FRAMES):
             f.write(struct.pack(f"<{N_SENSORS}h", *[(ff << 12) | i for i in range(N_SENSORS)]))
+    with imp.open("wb") as f:
+        for ff in range(N_FILE_FRAMES):
+            f.write(struct.pack(f"<{N_SENSORS}h", *[IMP_TAG | (ff << 12) | i for i in range(N_SENSORS)]))
 
 
 # =============================================================================
 # main
 # =============================================================================
+LEGS = {"normal": 1, "imp_even": 2, "imp_odd": 3}
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--release-dir", default=str(RELEASE), help="dir holding ionm_emulator.exe + ionm_emu_rtl.exe")
     ap.add_argument("--frames", type=int, default=6, help="frames to capture per emulator per leg")
-    ap.add_argument("--legs", default="normal,imp_even,imp_odd", help="comma list of: normal, imp_even, imp_odd")
-    ap.add_argument("--imp-file", action="store_true", help="also run the informational -if leg")
+    ap.add_argument("--legs", default=",".join(LEGS), help="comma list of: " + ", ".join(LEGS))
     ap.add_argument("--sw-only", action="store_true"); ap.add_argument("--rtl-only", action="store_true")
-    ap.add_argument("--first-frame-timeout", type=float, default=180.0, help="s to wait for the first frame (RTL is slow)")
+    ap.add_argument("--first-frame-timeout", type=float, default=180.0, help="s to wait for the first frame")
     ap.add_argument("--frame-timeout", type=float, default=120.0)
     ap.add_argument("--cmd-timeout", type=float, default=60.0)
     ap.add_argument("--strict", action="store_true", help="ignore known_divergences.json — any difference fails")
@@ -531,8 +601,8 @@ def main() -> int:
 
     rel = Path(a.release_dir)
     sw_exe, rtl_exe = rel / "ionm_emulator.exe", rel / "ionm_emu_rtl.exe"
-    dat = rel / "diff_emulators_pattern.dat"
-    make_pattern_file(dat)
+    dat, imp = rel / "diff_emulators_pattern.dat", rel / "diff_emulators_imp.dat"
+    make_pattern_files(dat, imp)
     cell = load_elec_map(ELEC_MAP_H)
     known = {} if a.strict else json.loads((HERE / "known_divergences.json").read_text(encoding="utf-8")).get("divergences", {})
 
@@ -540,29 +610,27 @@ def main() -> int:
     log(f"sw emulator : {sw_exe} ({'present' if sw_exe.exists() else 'MISSING'})")
     log(f"rtl emulator: {rtl_exe} ({'present' if rtl_exe.exists() else 'MISSING'})")
     log(f"elec map    : {'parsed 4x1024 from ' + ELEC_MAP_H.name if cell else 'NOT FOUND — SW image = raw'}")
-    log(f"pattern     : {dat.name}  {N_FILE_FRAMES} frames, value = frame<<12 | sensor")
+    log(f"patterns    : -f value = frame<<12 | sensor;  -if value = 0x4000 | frame<<12 | sensor;  {N_FILE_FRAMES} frames each")
     log("")
 
-    legs = {"normal": 1, "imp_even": 2, "imp_odd": 3}
     checks: list[Check] = []
-    report: dict = {"legs": {}, "known_divergences_applied": []}
+    report: dict = {"legs": {}}
 
-    def run_pair(leg: str, mode: int, extra_args: list[str]) -> None:
-        log(f"=== leg {leg}: TELEM_EN=0x{mode:02X} {' '.join(extra_args)} ===")
+    def run_pair(leg: str, mode: int) -> None:
+        log(f"=== leg {leg}: TELEM_EN=0x{mode:02X}  (-f + -if given to both) ===")
+        emu_args = ["-f", str(dat), "-if", str(imp), "-loop"]
         sides = {}
         if not a.rtl_only:
-            sides["sw"] = run_emulator("sw", sw_exe, ["-f", str(dat), "-loop", *extra_args], mode, a.frames,
-                                       30.0, 15.0, a.cmd_timeout, log)
+            sides["sw"] = run_emulator("sw", sw_exe, emu_args, mode, a.frames, 30.0, 15.0, a.cmd_timeout, log)
             log(f"  [sw ] {len(sides['sw'].frames)} frames in {sides['sw'].seconds:.1f}s  {sides['sw'].error}")
         if not a.sw_only:
-            sides["rtl"] = run_emulator("rtl", rtl_exe, ["-f", str(dat), "-loop", *extra_args], mode, a.frames,
+            sides["rtl"] = run_emulator("rtl", rtl_exe, emu_args, mode, a.frames,
                                         a.first_frame_timeout, a.frame_timeout, a.cmd_timeout, log)
             log(f"  [rtl] {len(sides['rtl'].frames)} frames in {sides['rtl'].seconds:.1f}s  {sides['rtl'].error}")
 
         legrep = {"mode": mode, "sides": {}}
         for k, r in sides.items():
-            st = structural(r)
-            legrep["sides"][k] = {"frames": st.get("frames", 0), "structural": st, "ping": r.ping,
+            legrep["sides"][k] = {"frames": len(r.frames), "structural": structural(r), "ping": r.ping,
                                   "error": r.error, "seconds": round(r.seconds, 1), "short_msgs": r.n_short}
         report["legs"][leg] = legrep
         if len(sides) < 2:
@@ -586,7 +654,7 @@ def main() -> int:
         ss, sr = structural(sw), structural(rtl)
         for chk in ("tag_ok", "cnt_hi_ok", "phase_ok", "crc_ok", "monotonic"):
             add(f"structural/{chk}", ss[chk] == sr[chk], f"sw={ss[chk]} rtl={sr[chk]}")
-        log(f"        frame_cnt sw={[f.frame_cnt for f in sw.frames]} rtl={[f.frame_cnt for f in rtl.frames]}")
+        log(f"        frame_cnt sw={ss['frame_cnts']} rtl={sr['frame_cnts']}")
         add("structural/phase_flags", ss["phase_flags"] == sr["phase_flags"],
             f"bits[14:12] seen sw={ss['phase_flags']} rtl={sr['phase_flags']}")
         # Phase VALUES are timing-dependent, so only their zero/non-zero character
@@ -595,62 +663,70 @@ def main() -> int:
         add("structural/phase_reporting", (ss["phase_values"] == [0]) == (sr["phase_values"] == [0]),
             f"phase values sw={ss['phase_values'][:8]} rtl={sr['phase_values'][:8]}")
 
-        # Semantic: match frames by the source-file frame their data names, then
-        # compare the recovered electrode images.
-        sw_imgs = {}
-        for f in sw.frames:
-            img = to_elec_image(f.sensors, cell)
-            ff, agree = file_frame_of(img)
-            sw_imgs.setdefault(ff, (img, f.sensors, agree))
-        rtl_imgs = {}
-        for f in rtl.frames:
-            img = to_elec_image(f.sensors, None)
-            ff, agree = file_frame_of(img)
-            rtl_imgs.setdefault(ff, (img, f.sensors, agree))
-        common = [ff for ff in sw_imgs if ff in rtl_imgs and ff is not None and 0 <= ff < N_FILE_FRAMES]
-        log(f"        source frames seen sw={sorted(k for k in sw_imgs if k is not None)} rtl={sorted(k for k in rtl_imgs if k is not None)}")
+        # --- semantic: recover per side, match frames by the source frame the data names
+        tag = 0x0000 if mode == 1 else IMP_TAG
+        expect_name = "-f file" if mode == 1 else "-if file"
+
+        def recover(r: RunResult, use_map: bool) -> dict[int, list[int]]:
+            imgs: dict[int, list[int]] = {}
+            for f in r.frames:
+                if mode == 1:
+                    arrays = [decode_normal(f.words, f.phases)]
+                else:
+                    arrays = decode_impedance(f.words, f.phases, mode & 1)
+                for arr in arrays:
+                    img = to_elec_image(arr, cell if use_map else None)
+                    ff, agree = file_frame_of(img, tag)
+                    if ff is not None:
+                        imgs.setdefault(ff, img)
+            return imgs
+
+        sw_imgs, rtl_imgs = recover(sw, True), recover(rtl, False)
+        log(f"        source frames seen sw={sorted(sw_imgs)} rtl={sorted(rtl_imgs)}")
+        common = sorted(ff for ff in sw_imgs if ff in rtl_imgs)
         add("semantic/source_frames_overlap", bool(common), f"{len(common)} source frame(s) captured by both")
         if not common:
+            # still say which file each side is showing — the most useful diagnostic
+            for k, r in (("sw", sw), ("rtl", rtl)):
+                f0 = r.frames[0]
+                arr = decode_normal(f0.words, f0.phases) if mode == 1 else decode_impedance(f0.words, f0.phases, mode & 1)[0]
+                tags = sorted({v & 0xC000 for v in arr if v != NOVAL})
+                log(f"        info {k} first frame carries tag nibbles {[hex(t) for t in tags]} (expected {hex(tag)})")
             return
-        n_diff_total, worst = 0, ""
-        raw_equal_all = True
+        n_cmp = n_diff = 0
+        shape = ""
         for ff in common:
-            a_img, a_raw, _ = sw_imgs[ff]
-            b_img, b_raw, _ = rtl_imgs[ff]
-            n, ex = compare_images(a_img, b_img)
-            n_diff_total += n
-            raw_equal_all &= (a_raw == b_raw)
-            if n and not worst:
-                worst = classify(a_img, b_img, a_raw, b_raw) + "; e.g. " + ", ".join(
+            n, d, ex = compare_defined(sw_imgs[ff], rtl_imgs[ff])
+            n_cmp += n
+            n_diff += d
+            if d and not shape:
+                shape = classify(sw_imgs[ff], rtl_imgs[ff]) + "; e.g. " + ", ".join(
                     f"[{i}] sw=0x{x:04X} rtl=0x{y:04X}" for i, x, y in ex[:4])
-        add("semantic/recovered_image_equal", n_diff_total == 0,
-            f"{n_diff_total} differing sensors across {len(common)} matched frame(s)" + (f" — {worst}" if worst else ""))
-        log(f"        info raw (un-remapped) arrays equal: {raw_equal_all}")
-        # Does each side reproduce the FILE?  Not a pass/fail between the two, but
-        # it tells the reader which side to believe when they differ.
+        add("semantic/recovered_image_equal", n_diff == 0,
+            f"{n_diff} differing of {n_cmp} sensors compared across {len(common)} matched frame(s)"
+            + (f" — {shape}" if shape else ""))
+        # Each side vs the file it SHOULD be showing.  A pass/fail check per side:
+        # this is "does the emulator report the emulation data you gave it".
         for k, imgs in (("sw", sw_imgs), ("rtl", rtl_imgs)):
             ff = common[0]
-            exp = [(ff << 12) | i for i in range(N_SENSORS)]
-            n, _ = compare_images(imgs[ff][0], exp)
-            log(f"        info {k} recovered image vs file frame {ff}: {N_SENSORS - n}/{N_SENSORS} sensors equal")
-            report["legs"][leg]["sides"][k]["vs_file_equal"] = N_SENSORS - n
-        report["legs"][leg]["semantic"] = {"matched_frames": len(common), "diff_sensors": n_diff_total,
-                                           "raw_equal": raw_equal_all, "shape": worst}
+            exp = expected_image(tag, ff)
+            n, d, ex = compare_defined(imgs[ff], exp)
+            add(f"semantic/{k}_reports_{'sample' if mode == 1 else 'impedance'}_file", d == 0,
+                f"{n - d}/{n} carried sensors equal the {expect_name} frame {ff}"
+                + ("" if d == 0 else "; e.g. " + ", ".join(f"[{i}] got=0x{x:04X} want=0x{y:04X}" for i, x, y in ex[:3])))
+            report["legs"][leg]["sides"][k]["vs_file"] = {"compared": n, "equal": n - d}
+        report["legs"][leg]["semantic"] = {"matched_frames": len(common), "compared": n_cmp,
+                                           "diff_sensors": n_diff, "shape": shape}
 
     for leg in [s.strip() for s in a.legs.split(",") if s.strip()]:
-        if leg not in legs:
-            log(f"unknown leg {leg}"); return 2
-        run_pair(leg, legs[leg], [])
-    if a.imp_file:
-        imp = rel / "diff_emulators_imp.dat"
-        with imp.open("wb") as f:
-            f.write(struct.pack(f"<{N_SENSORS}h", *[(0x3 << 12) | (i ^ 0x555) for i in range(N_SENSORS)]))
-        run_pair("imp_file", 1, ["-if", str(imp)])
-        if not a.keep_dat:
-            imp.unlink(missing_ok=True)
+        if leg not in LEGS:
+            log(f"unknown leg {leg}")
+            return 2
+        run_pair(leg, LEGS[leg])
 
     if not a.keep_dat:
         dat.unlink(missing_ok=True)
+        imp.unlink(missing_ok=True)
 
     n_pass = sum(1 for c in checks if c.ok)
     n_known = sum(1 for c in checks if not c.ok and c.known)

@@ -84,9 +84,10 @@ file through both `ionm_emulator.exe` (C++ model) and `ionm_emu_rtl.exe`
 (Verilator RTL), drives both with the same host commands at the named pipe, and
 reports where the decoded results differ — structurally, and as the electrode
 image a host recovers.  Impedance is exercised mode-based (`TELEM_EN=0x02/0x03`).
-`emulator/known_divergences.json` names the understood gaps (CRC-pacing bug in
-the RTL, 2-bit `telem_en` missing from the SW tail, …) so only an *unexplained*
-difference turns the run red.  See `emulator/README.md`.
+`emulator/known_divergences.json` names any understood gaps so only an *unexplained*
+difference turns the run red — empty since 2026-09-09 (42/42 strict), after it
+found and closed six emulator gaps and one tail RTL bug (impedance T0/T1 alignment).
+See `emulator/README.md`.
 
 ## Test levels — and which to prefer
 
