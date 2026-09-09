@@ -1,0 +1,17 @@
+{
+  "_comment": "Differences between the SW emulator and the RTL emulator that are UNDERSTOOD and accepted for now. Key = <leg>/<check> as printed by diff_emulators.py; value = the reason, with the source location that explains it. A key here turns a red check into a KNOWN row (run with --strict to ignore this file). Remove a key when the gap is closed so the check goes back to guarding. Recorded 2026-09-09 against ionm_emulator.exe (557ab30 source) and ionm_emu_rtl.exe built from consolidator_v2 @ 0f7c8c0 (con_phase) + tail_fpga_small.",
+  "divergences": {
+    "normal/structural/crc_ok":   "RTL BUG, SW correct: the consolidator emits a bad wire CRC on every frame - the unmerged CRC-pacing fix 3f1d334 (edge-fix-test). Every 0819-era image does this. The SW emulator's CRC is right.",
+    "imp_odd/structural/crc_ok":  "same as normal/structural/crc_ok (CRC-pacing, 3f1d334)",
+    "imp_file/structural/crc_ok": "same as normal/structural/crc_ok (CRC-pacing, 3f1d334)",
+
+    "normal/structural/phase_reporting":   "MODEL DIFFERENCE, both contract-legal: the SW emulator reports a distinct per-leg start phase (7/19/41/58) and the host de-rotates; con_phase anchors each leg on the w0 sweep marker and reports phase 0. Recovered images are identical either way. Software Emulator/emulator/src/tail_fpga.cpp vs consolidator_v2/src/rtl/spi_ch_stream.v (resync_arm / phase_known).",
+    "imp_file/structural/phase_reporting": "same as normal/structural/phase_reporting",
+
+    "imp_even/frames_flow":                   "SW GAP (CLAUDE.md SW track, 2-bit telem_en): tail_fpga.cpp:59 stores telem_en_ = mosi_byte & 0x01, so TELEM_EN=0x02 (imp-even) reads as OFF and the SW tail never streams; the RTL tail (spi_slave_small.v, 2-bit telem_en) streams the even SD lanes.",
+    "imp_odd/semantic/recovered_image_equal": "SW GAP (same root as imp_even/frames_flow): TELEM_EN=0x03 has bit0 set, so the SW tail streams NORMAL data; the RTL tail streams impedance planes (asic_stream_tx.v imp_phase 2:1 T0/T1 interleave of the odd SD lanes), which the normal-mode decoder cannot reconstruct. Closing the gap = model telem_en[1:0] + the T0/T1 packing in tail_fpga.cpp.",
+    "imp_odd/structural/monotonic":           "OBSERVED WITH the imp_odd gap, not separately diagnosed: in impedance mode the RTL frame_cnt steps by ~62 between consecutive frames (measured 61,123,186,248,311,373 - i.e. one frame per ~62 ticks of the 2.5 kHz counter, far more than the 2:1 decimation alone predicts) while the SW side, streaming normal data, steps by 1. Re-examine once the SW tail models impedance mode.",
+
+    "imp_file/semantic/recovered_image_equal": "HARNESS GAP: the RTL emulator accepts -if but never reads it - RtlFileManager::impedance_value() in 'Consolidator FPGA/verilator/sim_main.cpp' has no caller - so it streams the -f file; the SW ASIC BFM auto-arms impedance mode (SCFG_I) for every sensor when an -if file is open (asic_bfm.cpp enable_small_tail_stream) and streams the -if values. The two sides are showing different FILES, not different models. Informational leg."
+  }
+}

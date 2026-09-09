@@ -77,6 +77,17 @@ PATH, or its bundled `python.exe` shadows the system interpreter.
 Verdict is regression-vs-baseline (`.github/workflows/baseline.json` in the design repo), not
 all-green — see that file's `_comment` and the CLAUDE.md section "Test suite".
 
+## SW emulator vs RTL emulator — `emulator/`
+
+`emulator/diff_emulators.py` is a different kind of test: it streams one sample
+file through both `ionm_emulator.exe` (C++ model) and `ionm_emu_rtl.exe`
+(Verilator RTL), drives both with the same host commands at the named pipe, and
+reports where the decoded results differ — structurally, and as the electrode
+image a host recovers.  Impedance is exercised mode-based (`TELEM_EN=0x02/0x03`).
+`emulator/known_divergences.json` names the understood gaps (CRC-pacing bug in
+the RTL, 2-bit `telem_en` missing from the SW tail, …) so only an *unexplained*
+difference turns the run red.  See `emulator/README.md`.
+
 ## Test levels — and which to prefer
 
 **Boundary tests** drive one protocol edge and observe another, with production
