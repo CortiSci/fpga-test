@@ -7,9 +7,9 @@ set REPO_ROOT  "C:/cortisci/IONM-A/IONM-A-FPGA"
 set TEST_ROOT  "$REPO_ROOT/fpga-test"
 set TAIL_ROOT  "$REPO_ROOT/tail_fpga_small"
 set RTL_DIR    "$TAIL_ROOT/src/rtl"
-set SIM_DIR    "$TEST_ROOT/tail_fpga_small/src/sim"
-set SCRIPT_DIR "$TAIL_ROOT/scripts"
-set SIM_MODELS "$TEST_ROOT/common/src/sim/models"
+set SIM_DIR    "$TEST_ROOT/tail"
+set SCRIPT_DIR "$TEST_ROOT/tail/scripts"
+set SIM_MODELS "$TEST_ROOT/models"
 
 catch {quit -sim}
 cd "$SIM_DIR"

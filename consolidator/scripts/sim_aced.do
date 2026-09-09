@@ -1,18 +1,17 @@
 # ============================================================
-# QuestaSim Deferred V2 Tests — Consolidator V2
-# Location : consolidator_v2/scripts/sim_deferred.do
+# QuestaSim SA-ACED Streaming Test — Consolidator V2
+# Location : consolidator_v2/scripts/sim_aced.do
 # Invoked from QuestaSim GUI:
-#   do "C:/cortisci/IONM-A/IONM-A-FPGA/consolidator_v2/scripts/sim_deferred.do"
+#   do "C:/cortisci/IONM-A/IONM-A-FPGA/consolidator_v2/scripts/sim_aced.do"
 #   run -all
 #
-# Compiles with +define+RUN_DEFERRED — runs the deferred robustness suite:
-#   SA-04-V2 : Leg FIFO overflow detection + FR-02 local_rst recovery
-#   UC-03-V2 : Ctrl response deferred to 4105-word frame boundary
-#   UC-04-V2 : Fault packet deferred to 4105-word frame boundary
-#   FR-03-V2 : PLL lock-loss fault packet + post-recovery register read
+# Compiles with +define+RUN_ACED — runs only the SA-ACED task:
+#   USB cmd → spi_cfg → spi_master → tail_fpga_small → asic_stream_tx
+#   → spi_ch_stream → telem_engine_v3 → FT600Q TLM
 #
-# 50 ms timeout. force/release on dut_con.pll_locked (FR-03) is an approved
-# exception documented in docs/sim_guidelines.md §3.
+# ASIC model set to CONSTANT 0xACED by the task (testbench variable
+# assignment — not a force on any FPGA/inter-FPGA signal).
+# 80 ms timeout covers 2 full V3 super-frames (4105 words each).
 #
 # Path strategy: all paths use the C:/cortisci junction (no spaces).
 # See docs/simulation_standards.md for the simulation standards guide.
@@ -20,19 +19,26 @@
 
 set USE_PLL_STUB 1
 
-set DEFINES "+define+RUN_DEFERRED+USE_PLL_STUB"
-if {!$USE_PLL_STUB} { set DEFINES "+define+RUN_DEFERRED" }
+# A scoped wrapper may provide SIM_DEFINES (for example RUN_SINGLE_LEG) while
+# reusing this canonical source-order manifest.  Standalone SA-ACED retains
+# its historical default.
+if {[info exists SIM_DEFINES]} {
+    set DEFINES $SIM_DEFINES
+} else {
+    set DEFINES "+define+RUN_ACED+USE_PLL_STUB"
+    if {!$USE_PLL_STUB} { set DEFINES "+define+RUN_ACED" }
+}
 
 set REPO_ROOT    "C:/cortisci/IONM-A/IONM-A-FPGA"
 # Benches, models and tasks live in the fpga-test submodule (mirrors the
 # design repo layout).  RTL stays under REPO_ROOT.
 set TEST_ROOT    "$REPO_ROOT/fpga-test"
 set PROJ_ROOT    "$REPO_ROOT/consolidator_v2"
-set SCRIPT_DIR   "$PROJ_ROOT/scripts"
-set SIM_DIR      "$TEST_ROOT/consolidator_v2/src/sim"
+set SCRIPT_DIR   "$TEST_ROOT/consolidator/scripts"
+set SIM_DIR      "$TEST_ROOT/consolidator"
 set RTL_CON      "$PROJ_ROOT/src/rtl"
-set SIM_MODELS   "$TEST_ROOT/common/src/sim/models"
-set SIM_TASKS    "$TEST_ROOT/common/src/sim/tasks"
+set SIM_MODELS   "$TEST_ROOT/models"
+set SIM_TASKS    "$TEST_ROOT/tasks"
 set RTL_TAIL     "$REPO_ROOT/tail_fpga_small/src/rtl"
 
 puts "REPO_ROOT    : $REPO_ROOT"
@@ -90,9 +96,12 @@ vlog -work work -sv $DEFINES "$SIM_MODELS/ft600q_tlm.sv"
 vlog -work work -sv $DEFINES "$SIM_MODELS/ucsd_asic_model.sv"
 vlog -work work -sv $DEFINES "$SIM_MODELS/ads122c14_i2c_model.sv"
 vlog -work work -sv $DEFINES "$SIM_MODELS/spi_master_bfm.sv"
-vlog -work work -sv $DEFINES "$SIM_DIR/tb_top.sv"
+if {![info exists SIM_TB_FILE]} { set SIM_TB_FILE "tb_top.sv" }
+if {![info exists SIM_TOP]} { set SIM_TOP "tb_top" }
+if {![info exists SIM_LOG]} { set SIM_LOG "sim_aced.log" }
+vlog -work work -sv $DEFINES "$SIM_DIR/$SIM_TB_FILE"
 
-vsim -t 1ns -suppress 12110 -voptargs="+acc" -lib work -l "$SCRIPT_DIR/sim_deferred.log" tb_top
+vsim -t 1ns -suppress 12110 -voptargs="+acc" -lib work -l "$SCRIPT_DIR/$SIM_LOG" $SIM_TOP
 
 if {[file exists "$SCRIPT_DIR/wave.do"]} {
     do "$SCRIPT_DIR/wave.do"

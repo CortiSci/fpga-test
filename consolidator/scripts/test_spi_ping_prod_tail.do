@@ -38,7 +38,7 @@ if {$USE_PLL_STUB} { append DEFINES " +define+USE_PLL_STUB" }
 
 # ---- Path declarations (8.3 short-names to remove OneDrive spaces) ----------
 set PROJ_ROOT    "C:/Users/geoff/OneDrive/DOCUME~1/python/FDA510~1/FPGADE~1/IONM-A~1/consolidator_v2"
-set SCRIPT_DIR   "$PROJ_ROOT/scripts"
+set SCRIPT_DIR   "$TEST_ROOT/consolidator/scripts"
 set SIM_DIR      "$PROJ_ROOT/src/sim"
 set RTL_CON      "$PROJ_ROOT/src/rtl"
 set V2_MODELS    "$SIM_DIR/models"

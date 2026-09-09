@@ -29,11 +29,11 @@ set REPO_ROOT  "C:/cortisci/IONM-A/IONM-A-FPGA"
 set TEST_ROOT  "$REPO_ROOT/fpga-test"
 set TAIL_ROOT  "$REPO_ROOT/tail_fpga_small"
 set RTL_DIR    "$TAIL_ROOT/src/rtl"
-set SIM_DIR    "$TEST_ROOT/tail_fpga_small/src/sim"
-set SCRIPT_DIR "$TAIL_ROOT/scripts"
+set SIM_DIR    "$TEST_ROOT/tail"
+set SCRIPT_DIR "$TEST_ROOT/tail/scripts"
 
 # Shared stubs and models from common/
-set SIM_MODELS "$TEST_ROOT/common/src/sim/models"
+set SIM_MODELS "$TEST_ROOT/models"
 
 puts "TAIL_ROOT  : $TAIL_ROOT"
 puts "RTL_DIR    : $RTL_DIR"
@@ -51,7 +51,7 @@ if {[file exists work]} { file delete -force work }
 vlib work
 vmap work work
 
-# ---- Primitive stubs from common/src/sim/models/ ----------------------------
+# ---- Primitive stubs from models/ ----------------------------
 # gsr_stub.v  : defines GSR (and PUR); GSR is instantiated in tail_fpga_small.v
 # oddrx1f_stub.v : defines ODDRXE; instantiated in spi_passthrough.v
 vlog -work work "$SIM_MODELS/gsr_stub.v"

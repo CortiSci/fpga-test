@@ -18,10 +18,13 @@ in the design repo):
 | `TEST_ROOT` | this repo: benches, models, stubs, task packages, `.do` scripts | `IONM_TEST_ROOT` |
 
 Source paths in target definitions stay written **repo-relative** — e.g.
-`consolidator_v2/src/sim/tb_board.sv` and
+`consolidator/tb_board.sv` and
 `consolidator_v2/src/rtl/spi_ch_stream.v` — and are routed to the owning root
-by `_is_dut_path()`. That is why the directory layout here mirrors the design
-repo instead of being flattened: nothing in the target lists had to change.
+by `_is_dut_path()`. The layout here is FLAT and version-neutral — `consolidator/`, `tail/`,
+`models/`, `tasks/` — not `consolidator_v2/src/sim/`.  The benches are meant to
+run against every implementation of a module regardless of its version, so the
+repo is named after the module, not the revision.  The runner maps its
+repo-relative test paths onto this layout.
 
 ### The manifest travels with the design
 
@@ -63,9 +66,9 @@ a model for each edge:
 
 | edge | model |
 |---|---|
-| ASIC ↔ Tail | `common/src/sim/models/ucsd_asic_model.sv` (`ro1_clk`, `ro1_sd[15:0]`, `ro1_frame`, SPI) |
+| ASIC ↔ Tail | `models/ucsd_asic_model.sv` (`ro1_clk`, `ro1_sd[15:0]`, `ro1_frame`, SPI) |
 | Tail ↔ Consolidator | real RTL both sides in the full-stack benches |
-| Consolidator ↔ Host | `common/src/sim/models/ft600q_tlm.sv` |
+| Consolidator ↔ Host | `models/ft600q_tlm.sv` |
 
 **Unit benches** poke internal signals (`tb_rotation.sv` reads `dut.wcnt`,
 `w0_dist`, `resync_arm`). They are useful for isolating a defect but are

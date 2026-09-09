@@ -23,8 +23,8 @@ if {$USE_PLL_STUB} { append DEFINES "+define+USE_PLL_STUB" }
 #    REPO_ROOT : IONM-A-FPGA repo root via C:/cortisci junction
 #    PROJ_ROOT : consolidator_v2 directory
 #    SIM_DIR   : consolidator_v2 testbench sources
-#    SIM_MODELS: shared models — common/src/sim/models (no spaces)
-#    SIM_TASKS : shared tasks  — common/src/sim/tasks  (no spaces)
+#    SIM_MODELS: shared models — models (no spaces)
+#    SIM_TASKS : shared tasks  — tasks  (no spaces)
 #    RTL_TAIL  : tail_fpga_small RTL (no spaces via REPO_ROOT)
 # ============================================================
 set REPO_ROOT    "C:/cortisci/IONM-A/IONM-A-FPGA"
@@ -32,11 +32,11 @@ set REPO_ROOT    "C:/cortisci/IONM-A/IONM-A-FPGA"
 # design repo layout).  RTL stays under REPO_ROOT.
 set TEST_ROOT    "$REPO_ROOT/fpga-test"
 set PROJ_ROOT    "$REPO_ROOT/consolidator_v2"
-set SCRIPT_DIR   "$PROJ_ROOT/scripts"
-set SIM_DIR      "$TEST_ROOT/consolidator_v2/src/sim"
+set SCRIPT_DIR   "$TEST_ROOT/consolidator/scripts"
+set SIM_DIR      "$TEST_ROOT/consolidator"
 set RTL_CON      "$PROJ_ROOT/src/rtl"
-set SIM_MODELS   "$TEST_ROOT/common/src/sim/models"
-set SIM_TASKS    "$TEST_ROOT/common/src/sim/tasks"
+set SIM_MODELS   "$TEST_ROOT/models"
+set SIM_TASKS    "$TEST_ROOT/tasks"
 set RTL_TAIL     "$REPO_ROOT/tail_fpga_small/src/rtl"
 
 puts "REPO_ROOT    : $REPO_ROOT"
