@@ -53,6 +53,30 @@ con_phase (adopted)     9216 pass / 11 fail
 geoff-green 72606e4    11264 pass /  1 fail
 ```
 
+## Running the suite locally
+
+The design repo carries the runner; this repo carries the benches.  From the
+design repo root, in a bash shell:
+
+```bash
+export PATH="$PATH:/c/oss-cad-suite/bin"          # APPEND — the suite ships its own python.exe
+PYTHONIOENCODING=utf-8 /c/Python314/python.exe tools/ci/run_suite.py --out out/sim_results.json
+```
+
+All 19 targets take about 90 seconds.  You get a per-target table,
+`sim_results.json` with every target's failure lines, and `out/logs/<target>.log`
+with each vvp transcript.  This is byte-for-byte what GitHub CI runs
+(`.github/workflows/sim.yml`), so a local run is an exact preview.
+
+Two Windows traps worth knowing, both fixed in the driver but easy to reintroduce
+in ad-hoc scripts: `subprocess` with `text=True` decodes vvp output in the
+**locale** codec (cp1252), which throws on these benches' UTF-8 glyphs — always
+pass `encoding="utf-8"`; and the OSS CAD Suite's `bin/` must be *appended* to
+PATH, or its bundled `python.exe` shadows the system interpreter.
+
+Verdict is regression-vs-baseline (`ci/baseline.json` in the design repo), not
+all-green — see that file's `_comment` and the CLAUDE.md section "Test suite".
+
 ## Test levels — and which to prefer
 
 **Boundary tests** drive one protocol edge and observe another, with production
