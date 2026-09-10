@@ -61,6 +61,7 @@ module tb_bist;
     // 500 is 10× margin; far below the 5 ms outer guard (1,250,000 cycles).
     localparam RECV_TIMEOUT   = 500;
 
+    wire test_sig, test_amp_shdn;   // TC-BIST-09
     reg mclk;
     reg sclk_fast;   // 250 MHz — telemetry rate (proportional to 51.2 MHz)
     reg sclk_slow;   // 3.906 MHz — SPI command rate (proportional to 800 kHz)
@@ -104,8 +105,8 @@ module tb_bist;
         .FPGA_SPI_SCLK        (sclk          ),
         .FPGA_SPI_SS          (ss_n          ),
         .MCLK_EN              (              ),
-        .TEST_SIG             (              ),
-        .REC_TEST_AMP_SHDN    (              ),
+        .TEST_SIG             (test_sig      ),
+        .REC_TEST_AMP_SHDN    (test_amp_shdn ),
         .MCLK_20_48M          (mclk          ),
         .DEVRST_N             (devrst_n      ),
         .SDA_CurrentSense_ADC (              ),
@@ -611,6 +612,36 @@ module tb_bist;
         chk1("TC-BIST-08 stop: arm cleared by TELEM_EN=0", dut.u_stream_tx.arm, 1'b0);
 
         // ==================================================================
+        // TC-BIST-09  ctrl_reg[2] TEST_SIG_EN: amp enabled and a 625 Hz square wave
+        // ==================================================================
+        // The bring-up tool's "TEST_SIG generator" is this one bit (CTRL opcode
+        // 0x01).  st_sd[11] of the self-test counter toggles every 2048 st_clk =
+        // 16384 MCLK cycles, so TEST_SIG has a period of 32768 MCLK cycles
+        // (1.6 ms at 20.48 MHz; 327.68 us with this bench's scaled MCLK).
+        // 2026-09-10 14:24: the tool never set the bit after a restart and no
+        // recording carried the tone — this pins the RTL side of that path.
+        $display("\n[TC-BIST-09] CTRL bit[2] TEST_SIG_EN → REC_TEST_AMP_SHDN=0, TEST_SIG 625 Hz");
+        chk1("TC-BIST-09 before: amp shut down (SHDN=1)", test_amp_shdn, 1'b1);
+        chk1("TC-BIST-09 before: TEST_SIG idle low",      test_sig,      1'b0);
+        spi_cmd(8'h01, 8'h15);                              // RO_RSTn | TEST_SIG_EN | MCLK_EN
+        repeat(4) @(posedge mclk);
+        chk1("TC-BIST-09 ctrl_reg[2] set",                  dut.ctrl_reg[2], 1'b1);
+        chk1("TC-BIST-09 amp enabled (SHDN=0)",             test_amp_shdn,   1'b0);
+        begin : tsig_period
+            time t_rise0, t_rise1;
+            longint cyc;
+            @(posedge test_sig); t_rise0 = $time;
+            @(posedge test_sig); t_rise1 = $time;
+            cyc = (t_rise1 - t_rise0) / (2 * MCLK_HALF);
+            chk1("TC-BIST-09 TEST_SIG period = 32768 MCLK cycles (625 Hz)", cyc == 32768, 1'b1);
+            if (cyc != 32768) $display("    measured %0d MCLK cycles", cyc);
+        end
+        spi_cmd(8'h01, 8'h11);                              // bit cleared again
+        repeat(4) @(posedge mclk);
+        chk1("TC-BIST-09 after: amp shut down (SHDN=1)",    test_amp_shdn, 1'b1);
+        chk1("TC-BIST-09 after: TEST_SIG forced low",       test_sig,      1'b0);
+
+        // ==================================================================
         // Final report
         // ==================================================================
         $display("\n=============================================================");
@@ -628,8 +659,8 @@ module tb_bist;
     // =========================================================================
 
     initial begin
-        #10_000_000;  // 10 ms — TC-BIST-08 adds ~1.8 ms (10 frames × 82 µs each × 2)
-        $display("[TIMEOUT] Simulation exceeded 10 ms — possible deadlock in recv_word");
+        #12_000_000;  // 12 ms — TC-BIST-08 adds ~1.8 ms (10 frames × 82 µs each × 2), TC-BIST-09 ~0.7 ms
+        $display("[TIMEOUT] Simulation exceeded 12 ms — possible deadlock in recv_word");
         $display("STATUS : FAIL");
         $finish;
     end

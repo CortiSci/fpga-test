@@ -411,6 +411,8 @@ module tb_top;
         run_SA_USB_JITTER();     // many short host read gaps: phase stability (tests/test_host_xact.sv)
 `elsif RUN_USB_STALL
         run_SA_USB_STALL();      // host USB read gaps (tests/test_host_xact.sv)
+`elsif RUN_USB_STALL_CMDS
+        run_SA_USB_STALL_CMDS(); // commands issued while the host is not reading (tests/test_host_xact.sv)
 `else
         run_SA_HOST_XACT();
 `endif

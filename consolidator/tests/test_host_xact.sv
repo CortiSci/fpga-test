@@ -306,6 +306,184 @@ task automatic run_SA_HOST_XACT();
     $display("STATUS: %0s", (n_fail == 0) ? "PASS" : "FAIL");
 endtask
 
+`ifdef RUN_USB_STALL_CMDS
+// ---------------------------------------------------------------------------
+// SA-USBSTALL-CMDS — the host stops reading (the FT600 fills, TXE_N high) and,
+// while it is not reading, keeps issuing register commands.  2026-09-10 14:23:53
+// (asic_grid_asic_20260910_142349): 2.4 ms after RUN the bring-up tool's capture
+// thread blocked itself for 6 s (see DeviceLayer.cpp tl_in_capture_loop) while
+// sending four SPI_CFG writes; none was answered, the fifth USB write failed and
+// the link had to be reconnected.  At 14:24:18 a write failed the same way with
+// one command in flight.  This bench pins the FPGA's side of that contract:
+//   1. commands written while the FPGA cannot send are still READ out of the
+//      FT600 (the OUT FIFO never backs up onto the host: no 500 ms write timeout);
+//   2. every one of them is answered, in order, once the host reads again
+//      (one per frame boundary: the no-puncture hold, so N_CMD + 2 frames);
+//   3. streaming resumes right-or-flagged and strict-correct within RECOVER_FRAMES;
+//   4. no write into a full FT600, no punctured frame.
+// ---------------------------------------------------------------------------
+task automatic run_SA_USB_STALL_CMDS();
+    localparam int N_STALL        = 2;
+    localparam int STALL_NS       = 2_000_000;   // ~2 ms host read gap
+    localparam int N_CMD          = 4;           // commands issued inside each gap
+    localparam int DRAIN_NS       = 400_000;     // FPGA must have read them within this
+    localparam int RECOVER_FRAMES = 8;
+    localparam int SETTLE_FRAMES  = 8;
+    localparam int BETWEEN_FRAMES = 3;
+    logic [15:0] m, f, a, d;
+`ifdef ICARUS
+    logic [47:0] tx, rx;
+`else
+    logic [7:0]  tx[0:5], rx[0:5];
+`endif
+    logic [15:0] hdr;
+    int          n_fail = 0, n_pass = 0, n_flush, dropped, queued;
+    int          frame_no = 0, k, ch, i, all_clean, window_clean, pending;
+
+    $display("");
+    $display("[SA-USBSTALL-CMDS] host read gaps (~%0d us) with %0d commands issued inside each: FPGA must keep reading and answer them all", STALL_NS / 1000, N_CMD);
+
+    tb_top.tail_ch[0].asic_model.data_mode = MODE_UNIQUE;
+    tb_top.tail_ch[3].asic_model.data_mode = MODE_UNIQUE;
+    hx_armed_mask = 4'h9;
+
+    tb_top.u_ft600q.send_command_frame(CMD_MAGIC, flags_wr(), REG_SPI_EN_MASK, 16'h0009);
+    tb_top.u_ft600q.wait_response_frame_typed(m, f, a, d);
+    tb_top.u_ft600q.send_command_frame(CMD_MAGIC, flags_wr(), REG_SPI_CLK_DIV, 16'h001F);
+    tb_top.u_ft600q.wait_response_frame_typed(m, f, a, d);
+    #200;
+    for (ch = 0; ch < 4; ch += 3) begin
+`ifdef ICARUS
+        tx = 48'h01_11_00_00_00_00; spi_cfg_xact(ch[1:0], tx, 3'd2, rx);
+        tx = 48'h02_01_00_00_00_00; spi_cfg_xact(ch[1:0], tx, 3'd2, rx);
+`else
+        tx = '{8'h01, 8'h11, 8'h00, 8'h00, 8'h00, 8'h00}; spi_cfg_xact(ch[1:0], tx, 3'd2, rx);
+        tx = '{8'h02, 8'h01, 8'h00, 8'h00, 8'h00, 8'h00}; spi_cfg_xact(ch[1:0], tx, 3'd2, rx);
+`endif
+    end
+    tb_top.u_ft600q.send_command_frame(CMD_MAGIC, flags_wr(), 16'h0140, 16'h0009);   // ACQ_ALL_RUN legs 0,3
+    tb_top.u_ft600q.wait_response_frame_typed(m, f, a, d);
+`ifdef ICARUS
+    tb_top.u_ft600q.flush_tx_capture(n_flush);
+`else
+    begin logic [15:0] fw [0:4095]; tb_top.u_ft600q.flush_tx_capture(fw, n_flush); end
+`endif
+    tb_top.u_ft600q.enable_frame_trace(1'b1);
+
+    // ── start-up: an all-clean frame within SETTLE_FRAMES ─────────────────────
+    hx_grab_frame(hdr);
+    window_clean = 0;
+    for (i = 0; i < SETTLE_FRAMES; i++) begin
+        hx_grab_frame(hdr); frame_no++;
+        hx_judge_frame(frame_no, n_pass, n_fail, all_clean);
+        if (all_clean) begin window_clean = 1; break; end
+    end
+    if (window_clean) begin n_pass++; $display("[SA-USBSTALL-CMDS] start-up: all-clean frame within %0d frame(s)", i + 1); end
+    else begin n_fail++; $display("[SA-USBSTALL-CMDS] FAIL start-up: no all-clean frame within %0d frames", SETTLE_FRAMES); end
+
+    for (k = 0; k < N_STALL; k++) begin
+        for (i = 0; i < BETWEEN_FRAMES; i++) begin
+            hx_grab_frame(hdr); frame_no++;
+            hx_judge_frame(frame_no, n_pass, n_fail, all_clean);
+        end
+        $display("[SA-USBSTALL-CMDS] gap %0d: host stops reading  t=%0t", k, $time);
+        tb_top.u_ft600q.set_txe_backpressure(1'b1);
+        #(STALL_NS / 4);
+        // The tool's 14:23:53 traffic: SPI_CFG arm writes + a register read, while
+        // the FT600 is full.  Here: token write, mask read, token read, WD pet.
+        $display("[SA-USBSTALL-CMDS] gap %0d: %0d commands issued while not reading  t=%0t", k, N_CMD, $time);
+        tb_top.u_ft600q.send_command_frame(CMD_MAGIC, flags_wr(), REG_TOKEN_HI,    16'h1230 + k);
+        tb_top.u_ft600q.send_command_frame(CMD_MAGIC, flags_rd(), REG_SPI_EN_MASK, 16'h0000);
+        tb_top.u_ft600q.send_command_frame(CMD_MAGIC, flags_rd(), REG_TOKEN_HI,    16'h0000);
+        tb_top.u_ft600q.send_command_frame(CMD_MAGIC, flags_wr(), 16'h0052,        16'h0000);   // WD_PET, bit0 clear
+        #DRAIN_NS;
+        // 1. the FPGA read them out of the FT600 although it cannot send anything
+        queued = tb_top.u_ft600q.rx_count();
+        if (queued != 0) begin
+            n_fail++;
+            $display("[SA-USBSTALL-CMDS] FAIL gap %0d: %0d command word(s) still unread in the FT600 %0d us after being written — the FPGA stopped taking commands while it could not send (the host's FT_WritePipe would back up and time out)", k, queued, DRAIN_NS / 1000);
+        end else begin
+            n_pass++;
+            $display("[SA-USBSTALL-CMDS] gap %0d: all %0d command words read by the FPGA within %0d us while TXE_N was high", k, 4 * N_CMD, DRAIN_NS / 1000);
+        end
+        #(STALL_NS - STALL_NS / 4 - DRAIN_NS);
+        tb_top.u_ft600q.set_txe_backpressure(1'b0);
+        $display("[SA-USBSTALL-CMDS] gap %0d: host reading again  t=%0t", k, $time);
+
+        // 3. streaming: judge the first frames out, skip the pile, strict-correct within RECOVER_FRAMES
+        pending = tb_top.u_ft600q.telem_frames_pending();
+        for (i = 0; i < 2 && i < pending - 2; i++) begin
+            hx_grab_frame(hdr); frame_no++;
+            hx_judge_frame(frame_no, n_pass, n_fail, all_clean);
+        end
+        tb_top.u_ft600q.keep_newest_telemetry_frames(2, dropped);
+        window_clean = 0;
+        for (i = 0; i < RECOVER_FRAMES && !window_clean; i++) begin
+            hx_grab_frame(hdr); frame_no++;
+            $display("[SA-USBSTALL-CMDS] frame[%0d] (after gap %0d, +%0d) hdr=0x%04h cnt_lo=%0d phase={%04h %04h %04h %04h}",
+                     frame_no, k, i, hdr, tb_top.u_ft600q.v3_count_lo, hx_phase[0], hx_phase[1], hx_phase[2], hx_phase[3]);
+            hx_judge_frame(frame_no, n_pass, n_fail, all_clean);
+            if (all_clean) window_clean = 1;
+        end
+        if (window_clean) begin n_pass++; $display("[SA-USBSTALL-CMDS] after gap %0d: strict-correct again within %0d frame(s)", k, i); end
+        else begin n_fail++; $display("[SA-USBSTALL-CMDS] FAIL after gap %0d: no all-correct frame within %0d frames", k, RECOVER_FRAMES); end
+
+        // 2. every command answered, in order.  The decoder holds each response
+        //    until a frame boundary (no-puncture contract), so with the stream
+        //    running they arrive one per 400 us frame: allow N_CMD + 2 frames
+        //    from the moment the host reads again, counting the frames above.
+        for (; i < N_CMD + 2 && (tb_top.u_ft600q.ctrl_wr_ptr - tb_top.u_ft600q.ctrl_rd_ptr) < 4 * N_CMD; i++) begin
+            hx_grab_frame(hdr); frame_no++;
+            hx_judge_frame(frame_no, n_pass, n_fail, all_clean);
+        end
+        $display("[SA-USBSTALL-CMDS] gap %0d: %0d response word(s) after %0d frame(s) of reading again", k, tb_top.u_ft600q.ctrl_wr_ptr - tb_top.u_ft600q.ctrl_rd_ptr, i);
+        if ((tb_top.u_ft600q.ctrl_wr_ptr - tb_top.u_ft600q.ctrl_rd_ptr) < 4 * N_CMD) begin
+            n_fail++;
+            $display("[SA-USBSTALL-CMDS] FAIL gap %0d: only %0d of %0d response words arrived within %0d frames of the host reading again — command(s) issued during the gap were lost or the decoder is stuck",
+                     k, tb_top.u_ft600q.ctrl_wr_ptr - tb_top.u_ft600q.ctrl_rd_ptr, 4 * N_CMD, N_CMD + 2);
+            while ((tb_top.u_ft600q.ctrl_wr_ptr - tb_top.u_ft600q.ctrl_rd_ptr) >= 4)
+                tb_top.u_ft600q.wait_response_frame_typed(m, f, a, d);
+        end else begin
+            tb_top.u_ft600q.wait_response_frame_typed(m, f, a, d);
+            if (m !== 16'h55AA || a !== REG_TOKEN_HI || d !== (16'h1230 + k)) begin n_fail++; $display("[SA-USBSTALL-CMDS] FAIL gap %0d resp 1: {%04h %04h %04h %04h} (expected token write echo 0x%04h)", k, m, f, a, d, 16'h1230 + k); end
+            else n_pass++;
+            tb_top.u_ft600q.wait_response_frame_typed(m, f, a, d);
+            if (m !== 16'h55AA || a !== REG_SPI_EN_MASK || d[3:0] !== 4'h9) begin n_fail++; $display("[SA-USBSTALL-CMDS] FAIL gap %0d resp 2: {%04h %04h %04h %04h} (expected SPI_EN_MASK 0x0009)", k, m, f, a, d); end
+            else n_pass++;
+            tb_top.u_ft600q.wait_response_frame_typed(m, f, a, d);
+            if (m !== 16'h55AA || a !== REG_TOKEN_HI || d !== (16'h1230 + k)) begin n_fail++; $display("[SA-USBSTALL-CMDS] FAIL gap %0d resp 3: {%04h %04h %04h %04h} (expected TOKEN_HI 0x%04h)", k, m, f, a, d, 16'h1230 + k); end
+            else n_pass++;
+            tb_top.u_ft600q.wait_response_frame_typed(m, f, a, d);
+            if (m !== 16'h55AA || a !== 16'h0052) begin n_fail++; $display("[SA-USBSTALL-CMDS] FAIL gap %0d resp 4: {%04h %04h %04h %04h} (expected WD_PET echo)", k, m, f, a, d); end
+            else begin n_pass++; $display("[SA-USBSTALL-CMDS] gap %0d: all %0d commands answered in order after the host resumed reading", k, N_CMD); end
+        end
+        if ((tb_top.u_ft600q.ctrl_wr_ptr - tb_top.u_ft600q.ctrl_rd_ptr) != 0) begin
+            n_fail++;
+            $display("[SA-USBSTALL-CMDS] FAIL gap %0d: %0d unexpected ctrl word(s) after the %0d responses", k, tb_top.u_ft600q.ctrl_wr_ptr - tb_top.u_ft600q.ctrl_rd_ptr, N_CMD);
+            while ((tb_top.u_ft600q.ctrl_wr_ptr - tb_top.u_ft600q.ctrl_rd_ptr) >= 4)
+                tb_top.u_ft600q.wait_response_frame_typed(m, f, a, d);
+        end
+    end
+
+    if (tb_top.u_ft600q.overflow_drop_count != 0) begin
+        n_fail++;
+        $display("[SA-USBSTALL-CMDS] FAIL %0d word(s) written while TXE_N was high (dropped by the FT600)", tb_top.u_ft600q.overflow_drop_count);
+    end else n_pass++;
+    if (tb_top.u_ft600q.puncture_count != 0) begin
+        n_fail += tb_top.u_ft600q.puncture_count;
+        $display("[SA-USBSTALL-CMDS] FAIL %0d telemetry frame(s) punctured", tb_top.u_ft600q.puncture_count);
+    end
+
+    $display("");
+    if (n_fail == 0)
+        $display("[SA-USBSTALL-CMDS] PASS — %0d checks: commands issued during %0d host read gaps were all read, all answered in order, stream right-or-flagged and re-aligned", n_pass, N_STALL);
+    else
+        $display("[SA-USBSTALL-CMDS] FAIL — %0d check(s) failed (%0d passed)", n_fail, n_pass);
+    $display("RESULTS: %0d passed, %0d failed", n_pass, n_fail);
+    $display("STATUS: %0s", (n_fail == 0) ? "PASS" : "FAIL");
+endtask
+`endif  // RUN_USB_STALL_CMDS
+
 `ifdef RUN_USB_STALL
 // ============================================================================
 // USB back-pressure — host read gaps must not leave a leg silently rotated
