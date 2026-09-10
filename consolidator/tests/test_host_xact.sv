@@ -40,6 +40,11 @@
 // (keep_newest_telemetry_frames), which is what a live host would see.
 // ============================================================================
 
+// Compiled only for its own target: the task names tb_top.tail_ch[0..3].asic_model,
+// which does not elaborate under RUN_SINGLE_LEG (that build has only
+// tail_ch[0].active_tail), and nothing else needs the 16x64x16 search below.
+`ifdef RUN_HOST_XACT
+
 logic [15:0] hx_data  [0:4095];  // frame under test (module scope: functions read it, and
 logic [15:0] hx_phase [0:3];     // C-05: Icarus takes no unpacked-array task ports)
 
@@ -290,3 +295,5 @@ task automatic run_SA_HOST_XACT();
     $display("RESULTS: %0d passed, %0d failed", n_pass, n_fail);
     $display("STATUS: %0s", (n_fail == 0) ? "PASS" : "FAIL");
 endtask
+
+`endif  // RUN_HOST_XACT
