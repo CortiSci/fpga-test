@@ -89,6 +89,14 @@ difference turns the run red — empty since 2026-09-09 (42/42 strict), after it
 found and closed six emulator gaps and one tail RTL bug (impedance T0/T1 alignment).
 See `emulator/README.md`.
 
+> **Suite target (2026-09-10):** `emulator_differential` — `HOST_TARGETS` in the design repo's
+> `tools/mcp_fpga_tools/simulation.py`, run by `tools/ci/run_suite.py` next to the Icarus targets
+> (and by `run_simulation("emulator_differential")`).  It is a *host* target: the DUT is the pair
+> of built emulators, so the runner reports **SKIP** (with the reason, never scored as a
+> regression) on the Linux CI runner and wherever `ionm_emulator.exe` / `ionm_emu_rtl.exe`
+> are not built.  Scored with the same `RESULTS:` / `STATUS:` contract as the SV benches.
+
+
 ## Test levels — and which to prefer
 
 **Boundary tests** drive one protocol edge and observe another, with production
