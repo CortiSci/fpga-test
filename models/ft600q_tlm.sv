@@ -66,7 +66,12 @@ module ft600q_tlm #(
     // Telemetry frame length: 37 for the V1/V2 37-word format (default), 4103
     // for the V3 format (header + 4096 data + 4 phase + 2 CRC).  Overridden by
     // the consolidator_v2 testbench; production testbenches keep the default.
-    localparam int          CAPN = 16384;   // capture ring (>= 3 frames of 4103)
+    // Capture ring.  16384 held <4 V3 frames: a bench that issues a USB command
+    // WHILE streaming waits ~1 frame per response (cmd_decoder holds it to the
+    // inter-frame gap), so one SPI transaction let ~6 frames arrive, the ring
+    // wrapped, and every frame read afterwards was misaligned (2026-09-09,
+    // test_host_xact).  65536 = 15 frames; the typed readers now $fatal on overrun.
+    localparam int          CAPN = 131072;  // 31 V3 frames
 
     // -------------------------------------------------------------------------
     // TX capture: all words written by the FPGA (flat, for flush_tx_capture)
@@ -111,6 +116,7 @@ module ft600q_tlm #(
     // -------------------------------------------------------------------------
     reg bp_force     = 1'b0;  // when 1, TXE_N is forced high (manual)
     reg dbg_tx_trace = 1'b0;  // when 1, log every captured TX word
+    bit  dbg_frame_trace = 1'b0;  // enable_frame_trace(): one line per frame boundary
 
     // Random backpressure injection state (§2.1)
     reg         bp_rand_enable      = 1'b0;
@@ -126,6 +132,13 @@ module ft600q_tlm #(
     int         bp_stat_events       = 0;
     int         bp_stat_cycles       = 0;
     int         bp_stat_words_stalled = 0;
+    // No-puncture monitor (telemetry_v3 ISSUE 3): a 0x55AA response magic seen
+    // at a NON-ZERO telemetry frame position means a ctrl response was inserted
+    // inside a telemetry frame.  The typed capture is position-based, so one
+    // puncture shifts every later frame by 4 words (payload lands in the phase
+    // slots) — and a real host parser desyncs the same way.
+    int         puncture_count     = 0;
+    int         puncture_first_pos = -1;
 
     // Overflow drop counter (§2.3)
     int         overflow_drop_count  = 0;
@@ -316,6 +329,26 @@ module ft600q_tlm #(
                         // Flat capture
                         tx_capture[tx_wr_ptr % CAPN] <= captured_word;
                         tx_wr_ptr <= tx_wr_ptr + 1;
+
+                        // No-puncture monitor (see puncture_count decl)
+                        if (tx_frame_pos != 0 && !tx_frame_is_ctrl && captured_word == RSP_MAGIC_VAL) begin
+                            puncture_count <= puncture_count + 1;
+                            if (puncture_first_pos < 0) puncture_first_pos <= tx_frame_pos;
+                            if (puncture_count < 3)
+                                $display("[FT600Q TLM] PUNCTURE: response magic 0x55AA at telemetry frame position %0d t=%0t",
+                                         tx_frame_pos, $time);
+                        end
+
+                        // Frame-boundary trace (enable_frame_trace): one line per frame
+                        // start, plus a MISFRAME line when a frame typed as telemetry
+                        // does not begin with the 0x0001 tag.
+                        if (dbg_frame_trace && tx_frame_pos == 0) begin
+                            $display("[FT600Q TLM] frame start t=%0t type=%s word0=0x%04h (telem_wr=%0d ctrl_wr=%0d)",
+                                     $time, (captured_word == RSP_MAGIC_VAL) ? "CTRL" : "TELEM", captured_word,
+                                     telem_wr_ptr, ctrl_wr_ptr);
+                            if (captured_word != RSP_MAGIC_VAL && captured_word != 16'h0001)
+                                $display("[FT600Q TLM] MISFRAME: telemetry-typed frame begins with 0x%04h, not the 0x0001 tag", captured_word);
+                        end
 
                         // Frame-start: determine type
                         if (tx_frame_pos == 0) begin
@@ -514,7 +547,23 @@ module ft600q_tlm #(
         end
         if (timeout >= 10_000_000)
             $fatal(1, "[FT600Q TLM] Timeout waiting for typed V3 telemetry frame");
+        if ((telem_wr_ptr - telem_rd_ptr) > CAPN)
+            $fatal(1, "[FT600Q TLM] telemetry capture ring OVERRUN: %0d words pending > CAPN %0d — the bench let too many frames pile up between reads",
+                   telem_wr_ptr - telem_rd_ptr, CAPN);
         o_hdr = telem_capture[telem_rd_ptr % CAPN];
+        // Same v3_* side outputs as the untyped reader, but from the telem-only
+        // capture: a bench that issues USB commands WHILE streaming must use
+        // this one — the raw capture interleaves 4-word responses and the
+        // untyped reader then returns frames shifted by 4 words (payload lands
+        // in the phase slots; seen 2026-09-09 as "phase word 0xaaaa").
+        begin : typed_v3_copy
+            automatic int i;
+            v3_count_lo = telem_capture[(telem_rd_ptr+1) % CAPN];
+            v3_count_hi = telem_capture[(telem_rd_ptr+2) % CAPN];
+            for (i = 0; i < 4096; i++) v3_data[i]  = telem_capture[(telem_rd_ptr+3+i)    % CAPN];
+            for (i = 0; i < 4;    i++) v3_phase[i] = telem_capture[(telem_rd_ptr+4099+i) % CAPN];
+            for (i = 0; i < 2;    i++) v3_crc[i]   = telem_capture[(telem_rd_ptr+4103+i) % CAPN];
+        end
         telem_rd_ptr = telem_rd_ptr + 4105;
     endtask
 
@@ -549,6 +598,32 @@ module ft600q_tlm #(
     // Enable/disable per-word TX capture trace
     task automatic enable_tx_trace(input logic ena);
         dbg_tx_trace = ena;
+    endtask
+
+    // Telemetry frames captured and not yet read.  Frames are back-to-back in
+    // telem_capture (ctrl words go to ctrl_capture), so boundaries are multiples
+    // of the frame length from the first telemetry word.
+    function automatic int telem_frames_pending();
+        return (telem_wr_ptr - telem_rd_ptr) / TELEM_FRAME_LEN;
+    endfunction
+
+    // Drop all pending telemetry frames except the newest `keep`.  A sequential
+    // bench that issues USB commands mid-stream cannot drain telemetry while it
+    // waits for responses (the DUT holds each one to an inter-frame gap), so
+    // frames pile up; a real host keeps reading.  Returns how many were dropped.
+    task automatic keep_newest_telemetry_frames(input int keep, output int dropped);
+        automatic int complete_frames, new_rd;
+        complete_frames = telem_wr_ptr / TELEM_FRAME_LEN;
+        new_rd = (complete_frames - keep) * TELEM_FRAME_LEN;
+        if (new_rd > telem_rd_ptr) begin
+            dropped = (new_rd - telem_rd_ptr) / TELEM_FRAME_LEN;
+            telem_rd_ptr = new_rd;
+        end else dropped = 0;
+    endtask
+
+    // Enable/disable the per-frame boundary trace (cheap: one line per frame)
+    task automatic enable_frame_trace(input logic ena);
+        dbg_frame_trace = ena;
     endtask
 
     // =========================================================================

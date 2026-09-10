@@ -292,6 +292,7 @@ module tb_top;
     `include "tests/test_deferred_v2.sv"
     `include "tests/test_silent_control.sv"
     `include "tests/test_single_leg.sv"
+    `include "tests/test_host_xact.sv"
 
     // =========================================================================
     // Main test sequence (default — runs when no other define selects a suite)
@@ -305,6 +306,7 @@ module tb_top;
 `ifndef RUN_SILENT_CONTROL
 `ifndef RUN_SINGLE_LEG
 `ifndef RUN_UNIQUE
+`ifndef RUN_HOST_XACT
     initial begin
         @(posedge devrst_n);
         #500;
@@ -346,6 +348,7 @@ module tb_top;
         #10_000_000;  // 10 ms — SM + CU + CV + SP well within budget
         $fatal(1, "[TB] Simulation timeout: V2 tests did not finish within 10 ms");
     end
+`endif  // !RUN_HOST_XACT
 `endif  // !RUN_SILENT_CONTROL
 `endif  // !RUN_SINGLE_LEG
 `endif  // !RUN_UNIQUE
@@ -391,6 +394,23 @@ module tb_top;
     initial begin
         #80_000_000;
         $fatal(1, "[TB_UNIQUE] Timeout: unique-data board test did not complete within 80 ms");
+    end
+`endif
+    // =========================================================================
+    // Host SPI_CFG readback traffic during streaming — strict alignment
+    // (compiled with +define+RUN_HOST_XACT; see tests/test_host_xact.sv)
+    // =========================================================================
+`ifdef RUN_HOST_XACT
+    initial begin
+        @(posedge devrst_n);
+        #500;
+        run_SA_HOST_XACT();
+        #1000;
+        $finish;
+    end
+    initial begin
+        #200_000_000;   // 200 ms: 2 + 6x3 frames at 400 us plus six 800 kHz readbacks
+        $fatal(1, "[TB_HOST_XACT] Timeout: host-transaction alignment test did not complete within 200 ms");
     end
 `endif
 
