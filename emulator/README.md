@@ -9,15 +9,17 @@ that the software emulator (`ionm_emulator.exe`, pure C++) behaves like the RTL
 
 ## Why a host program, not an Icarus/Verilator bench
 
-The two emulators share exactly one interface: the named-pipe transport that
-carries the bytes host software sees through the FTD3XX shim.  The SW emulator
+The two emulators share exactly one interface: the host transport that
+carries the bytes host software sees through the FTD3XX shim - Windows named
+pipes, or `AF_UNIX` sockets under `$IONM_PIPE_DIR` (default `/tmp`) on Linux,
+same framing either way (`Software Emulator/emulator/src/ipc_stream.h`).  The SW emulator
 is C++, so no simulator can host it; the RTL side is already a Verilator build.
 So the comparison is made **at the pipe, by a host**, which is where application
 code would notice a difference.  Verilator is used only to build the RTL side:
 
 ```bash
-# MSYS2 UCRT64 shell (design repo)
-cd consolidator_v2/verilator && bash ./build_rtl_emulator.sh     # -> Software Emulator/build/test_app/Release/ionm_emu_rtl.exe
+# design repo; MSYS2 UCRT64 on Windows, or Linux with verilator on PATH
+bash consolidator_v2/verilator/build_rtl_emulator.sh     # -> Software Emulator/build/test_app/Release/ionm_emu_rtl[.exe]
 ```
 
 The runner speaks the protocol directly (stdlib only, no shim, no pywin32):
@@ -42,9 +44,17 @@ about a minute; the RTL emulator produces 6 frames in ~1 s in normal mode.
 Flags: `--legs normal,imp_even,imp_odd` (default all three), `--frames N`, `--strict` (ignore the known list),
 `--sw-only` / `--rtl-only` for smoke-testing one side, `--out report.json`.
 
-The last two lines are the same sentinels the SV benches emit
+The last lines are the same sentinels the SV benches emit
 (`RESULTS: N passed, M failed` / `STATUS: PASS|FAIL`), so the result contract
-tooling can score it.
+tooling can score it, preceded by a `THROUGHPUT:` line - wall-clock frames/s each
+emulator delivered while the host read, per leg and averaged, and the sw/rtl
+ratio (the SW model paces itself to real time; the RTL runs at simulation speed).
+Also in the JSON report as `throughput` and per side `frames_per_s`.
+
+**On GitHub:** `.github/workflows/emulator.yml` builds both emulators on Ubuntu
+(g++/cmake, apt verilator) and runs this test `--strict`; the check summary shows
+the 42-check table and the throughput line.  Locally on Windows it is also the
+suite host target `emulator_differential`.
 
 ## What is compared — three layers
 

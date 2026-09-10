@@ -76,6 +76,7 @@ import zlib
 from dataclasses import dataclass, field
 from pathlib import Path
 from queue import Empty, Queue
+import socket
 
 HERE = Path(__file__).resolve().parent
 TEST_ROOT = HERE.parent
@@ -83,6 +84,10 @@ TEST_ROOT = HERE.parent
 # overridable so the runner can point at any checkout of the design.
 DUT_ROOT = Path(os.environ.get("IONM_DUT_ROOT", TEST_ROOT.parent))
 RELEASE = DUT_ROOT / "Software Emulator" / "build" / "test_app" / "Release"
+EXE = ".exe" if os.name == "nt" else ""          # both emulators deploy here on every platform
+# Transport endpoints: Windows named pipes \\.\pipe\<base>_*; elsewhere AF_UNIX
+# sockets at $IONM_PIPE_DIR/<base>_* (default /tmp) — see Software Emulator/emulator/src/ipc_stream.h.
+PIPE_DIR = os.environ.get("IONM_PIPE_DIR", "/tmp")
 ELEC_MAP_H = DUT_ROOT / "Software Emulator" / "emulator" / "src" / "subqv3_elec_map.h"
 
 # --- protocol constants (mirrors Software Emulator/test_app/src/ionm_test.cpp) ---
@@ -111,13 +116,20 @@ NOVAL = -1                 # placeholder for a sensor a leg does not carry
 # Pipe client
 # =============================================================================
 class PipeClient:
-    """Length-prefixed named-pipe client for either emulator.  A reader thread
-    feeds complete DATA-pipe messages into a queue so reads can time out."""
+    """Length-prefixed client for either emulator's host transport: Windows
+    named pipes, or AF_UNIX sockets elsewhere (same framing, same connection
+    order).  A reader thread feeds complete DATA messages into a queue so reads
+    can time out."""
 
     def __init__(self, base: str = "IONM_EMU"):
-        self.ctrl_path = rf"\\.\pipe\{base}_CTRL"
-        self.data_path = rf"\\.\pipe\{base}_DATA"
-        self.ctrl = None
+        self.base = base
+        if os.name == "nt":
+            self.ctrl_path = rf"\\.\pipe\{base}_CTRL"
+            self.data_path = rf"\\.\pipe\{base}_DATA"
+        else:
+            self.ctrl_path = os.path.join(PIPE_DIR, f"{base}_CTRL")
+            self.data_path = os.path.join(PIPE_DIR, f"{base}_DATA")
+        self.ctrl = None          # nt: file object; posix: socket
         self.data = None
         self.q: Queue = Queue()
         self._stop = threading.Event()
@@ -126,35 +138,44 @@ class PipeClient:
         self.n_short = 0          # messages that were neither 8 bytes nor a frame
 
     def wait_for_pipe(self, timeout_s: float) -> bool:
-        base = self.ctrl_path.rsplit("\\", 1)[1]
         t_end = time.time() + timeout_s
         while time.time() < t_end:
             try:
-                if base in os.listdir(r"\\.\pipe\\"):
+                if os.name == "nt":
+                    if f"{self.base}_CTRL" in os.listdir(r"\\.\pipe\\"):
+                        return True
+                elif os.path.exists(self.ctrl_path) and os.path.exists(self.data_path):
                     return True
             except OSError:
                 pass
             time.sleep(0.1)
         return False
 
+    def _open(self, path: str, mode: str):
+        if os.name == "nt":
+            return open(path, mode, buffering=0)
+        sk = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        sk.connect(path)
+        return sk
+
     def connect(self) -> None:
         # Same order as the shim's FT_Create: CTRL first, then DATA.
         for _ in range(50):
             try:
-                self.ctrl = open(self.ctrl_path, "wb", buffering=0)
+                self.ctrl = self._open(self.ctrl_path, "wb")
                 break
             except OSError:
                 time.sleep(0.1)
         if self.ctrl is None:
-            raise RuntimeError("could not open CTRL pipe")
+            raise RuntimeError("could not open CTRL endpoint")
         for _ in range(50):
             try:
-                self.data = open(self.data_path, "rb", buffering=0)
+                self.data = self._open(self.data_path, "rb")
                 break
             except OSError:
                 time.sleep(0.1)
         if self.data is None:
-            raise RuntimeError("could not open DATA pipe")
+            raise RuntimeError("could not open DATA endpoint")
         self._thr = threading.Thread(target=self._reader, daemon=True)
         self._thr.start()
 
@@ -167,11 +188,22 @@ class PipeClient:
             except OSError:
                 pass
 
+    def _recv(self, n: int) -> bytes:
+        if os.name == "nt":
+            return self.data.read(n)
+        return self.data.recv(n)
+
+    def _send(self, b: bytes) -> None:
+        if os.name == "nt":
+            self.ctrl.write(b)
+        else:
+            self.ctrl.sendall(b)
+
     def _read_exact(self, n: int) -> bytes | None:
         buf = bytearray()
         while len(buf) < n:
             try:
-                chunk = self.data.read(n - len(buf))
+                chunk = self._recv(n - len(buf))
             except (OSError, ValueError):
                 return None
             if not chunk:
@@ -198,7 +230,7 @@ class PipeClient:
 
     def send_cmd(self, flags: int, addr: int, data: int) -> None:
         payload = struct.pack("<4H", CMD_MAGIC, flags, addr, data)
-        self.ctrl.write(struct.pack("<H", len(payload)) + payload)
+        self._send(struct.pack("<H", len(payload)) + payload)
 
     def do_cmd(self, flags: int, addr: int, data: int, timeout_s: float,
                stray: list | None = None) -> int:
@@ -215,7 +247,7 @@ class PipeClient:
             except Empty:
                 raise TimeoutError(f"no response to addr=0x{addr:04X}")
             if msg is None:
-                raise RuntimeError("DATA pipe closed by emulator")
+                raise RuntimeError("DATA endpoint closed by emulator")
             if len(msg) == 8:
                 w = struct.unpack("<4H", msg)
                 if w[0] == RESP_MAGIC:
@@ -240,7 +272,7 @@ class PipeClient:
             except Empty:
                 return None
             if msg is None:
-                raise RuntimeError("DATA pipe closed by emulator")
+                raise RuntimeError("DATA endpoint closed by emulator")
             if len(msg) == TELEM_WORDS * 2:
                 return msg
 
@@ -450,7 +482,7 @@ def run_emulator(name: str, exe: Path, args: list[str], telem_mode: int, n_frame
     pipe = PipeClient()
     try:
         if not pipe.wait_for_pipe(30):
-            res.error = "emulator never created its pipes"
+            res.error = "emulator never created its transport endpoints"
             return res
         pipe.connect()
         res.launch_ok = True
@@ -584,7 +616,7 @@ LEGS = {"normal": 1, "imp_even": 2, "imp_odd": 3}
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--release-dir", default=str(RELEASE), help="dir holding ionm_emulator.exe + ionm_emu_rtl.exe")
+    ap.add_argument("--release-dir", default=str(RELEASE), help="dir holding ionm_emulator + ionm_emu_rtl (.exe on Windows)")
     ap.add_argument("--frames", type=int, default=6, help="frames to capture per emulator per leg")
     ap.add_argument("--legs", default=",".join(LEGS), help="comma list of: " + ", ".join(LEGS))
     ap.add_argument("--sw-only", action="store_true"); ap.add_argument("--rtl-only", action="store_true")
@@ -600,7 +632,7 @@ def main() -> int:
         print(s, flush=True)
 
     rel = Path(a.release_dir)
-    sw_exe, rtl_exe = rel / "ionm_emulator.exe", rel / "ionm_emu_rtl.exe"
+    sw_exe, rtl_exe = rel / f"ionm_emulator{EXE}", rel / f"ionm_emu_rtl{EXE}"
     dat, imp = rel / "diff_emulators_pattern.dat", rel / "diff_emulators_imp.dat"
     make_pattern_files(dat, imp)
     cell = load_elec_map(ELEC_MAP_H)
@@ -631,7 +663,8 @@ def main() -> int:
         legrep = {"mode": mode, "sides": {}}
         for k, r in sides.items():
             legrep["sides"][k] = {"frames": len(r.frames), "structural": structural(r), "ping": r.ping,
-                                  "error": r.error, "seconds": round(r.seconds, 1), "short_msgs": r.n_short}
+                                  "error": r.error, "seconds": round(r.seconds, 1), "short_msgs": r.n_short,
+                                  "frames_per_s": round(len(r.frames) / r.seconds, 2) if r.seconds > 0 else None}
         report["legs"][leg] = legrep
         if len(sides) < 2:
             return
@@ -733,6 +766,23 @@ def main() -> int:
     n_fail = sum(1 for c in checks if not c.ok and not c.known)
     report["checks"] = [c.__dict__ for c in checks]
     report["summary"] = {"pass": n_pass, "known_divergent": n_known, "fail": n_fail}
+    # Throughput: wall-clock frames/s each emulator delivered while the host read
+    # (the SW model paces itself to real time, 2500 sweeps/s; the RTL runs at
+    # simulation speed).  Reported per leg and averaged; sw/rtl is the speed ratio.
+    per_leg = []
+    sw_fps, rtl_fps = [], []
+    for leg, lr in report["legs"].items():
+        for side, acc in (("sw", sw_fps), ("rtl", rtl_fps)):
+            sd = lr["sides"].get(side)
+            if sd and sd.get("frames_per_s") is not None:
+                acc.append(sd["frames_per_s"])
+                per_leg.append(f"{leg}/{side}={sd['frames_per_s']:.1f}")
+    if sw_fps and rtl_fps:
+        sw_avg, rtl_avg = sum(sw_fps) / len(sw_fps), sum(rtl_fps) / len(rtl_fps)
+        report["throughput"] = {"sw_frames_per_s": round(sw_avg, 2), "rtl_frames_per_s": round(rtl_avg, 2),
+                                "sw_over_rtl": round(sw_avg / max(rtl_avg, 1e-9), 1)}
+        log(f"THROUGHPUT: sw {sw_avg:.1f} frames/s, rtl {rtl_avg:.1f} frames/s "
+            f"(sw/rtl = {sw_avg / max(rtl_avg, 1e-9):.1f}x); per leg: {' '.join(per_leg)}")
     if a.out:
         Path(a.out).write_text(json.dumps(report, indent=2), encoding="utf-8")
     log("")
