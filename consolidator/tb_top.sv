@@ -293,6 +293,7 @@ module tb_top;
     `include "tests/test_silent_control.sv"
     `include "tests/test_single_leg.sv"
     `include "tests/test_host_xact.sv"
+    `include "tests/test_watchdog.sv"
 
     // =========================================================================
     // Main test sequence (default — runs when no other define selects a suite)
@@ -307,6 +308,7 @@ module tb_top;
 `ifndef RUN_SINGLE_LEG
 `ifndef RUN_UNIQUE
 `ifndef RUN_HOST_XACT
+`ifndef RUN_WD_BITE
     initial begin
         @(posedge devrst_n);
         #500;
@@ -348,6 +350,7 @@ module tb_top;
         #10_000_000;  // 10 ms — SM + CU + CV + SP well within budget
         $fatal(1, "[TB] Simulation timeout: V2 tests did not finish within 10 ms");
     end
+`endif  // !RUN_WD_BITE
 `endif  // !RUN_HOST_XACT
 `endif  // !RUN_SILENT_CONTROL
 `endif  // !RUN_SINGLE_LEG
@@ -536,6 +539,24 @@ module tb_top;
         run_SA_SILENT_CONTROL();
         #1000;
         $finish;
+    end
+`endif
+
+    // =========================================================================
+    // Consolidator watchdog bite (compiled with +define+RUN_WD_BITE +define+SIM_SHORT_WD;
+    // see tests/test_watchdog.sv)
+    // =========================================================================
+`ifdef RUN_WD_BITE
+    initial begin
+        @(posedge devrst_n);
+        #500;
+        run_WD_BITE();
+        #1000;
+        $finish;
+    end
+    initial begin
+        #5_000_000;   // 5 ms: pets, bite window (~100 us short mode) and the register checks
+        $fatal(1, "[TB_WD] Timeout: watchdog bite test did not complete within 5 ms");
     end
     initial begin
         #30_000_000;
