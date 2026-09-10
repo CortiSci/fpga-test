@@ -47,6 +47,8 @@
 
 logic [15:0] hx_data  [0:4095];  // frame under test (module scope: functions read it, and
 logic [15:0] hx_phase [0:3];     // C-05: Icarus takes no unpacked-array task ports)
+int          hx_armed_mask = 4'hF;  // legs judged by hx_judge_frame (bit per leg); an
+                                    // unarmed leg carries the 1023 sentinel and is skipped
 
 // Strict per-leg reconstruction of hx_data.  Returns the matched
 // (frame_nibble*64 + sample_offset)*16 + plane_offset, or -1.
@@ -154,6 +156,7 @@ task automatic hx_judge_frame(input int frame_no, inout int n_pass, inout int n_
     begin
         all_clean_o = 1;
         for (uch = 0; uch < 4; uch++) begin
+            if (!hx_armed_mask[uch]) continue;
             hx_judge_leg(frame_no, uch, v);
             if (v == 2) n_fail++; else n_pass++;
             if (v != 0) all_clean_o = 0;
@@ -295,5 +298,157 @@ task automatic run_SA_HOST_XACT();
     $display("RESULTS: %0d passed, %0d failed", n_pass, n_fail);
     $display("STATUS: %0s", (n_fail == 0) ? "PASS" : "FAIL");
 endtask
+
+`ifdef RUN_USB_STALL
+// ============================================================================
+// USB back-pressure — host read gaps must not leave a leg silently rotated
+// (compiled with +define+RUN_HOST_XACT +define+RUN_USB_STALL)
+//
+// Hardware, 2026-09-10 10:10 (asic_grid_asic_20260910_101002, legs 5+8, 0xACED):
+// every frame flagged, ovf=0x9 sticky on both legs, skip=9, ACED bit-rotated by
+// every offset 1..15 — and the bring-up tool's own capture stat said
+// "reap gap max 2098 us": its USB read loop paused ~2 ms.  A 2 ms gap fills the
+// FT600 (txe_n high), then the 1024-word CDC (~100 us at 10 Mword/s), stalls
+// the engine, and overflows the 16-word leg FIFOs (~6 us at 2.56 Mword/s).  A
+// FIFO that drops ARBITRARY words on overflow shifts that leg's 16-plane
+// lattice by the drop count, and the leg decodes bit-rotated until something
+// re-anchors it.  The bench's FT600 model is always ready, so no other target
+// sees this.
+//
+// Contract at the USB boundary, same as run_SA_HOST_XACT:
+//   * every delivered leg-frame is strictly correct (plane_offset 0,
+//     sample_offset == its phase word) OR carries a fault flag (bits 14..12);
+//   * within RECOVER_FRAMES after each gap an all-correct frame reappears —
+//     data lost DURING the gap is inevitable (the host was not reading), but
+//     alignment must recover;
+//   * the FPGA never writes into a full FT600 (the TLM drops and counts those).
+// Leg mask 0x9 mirrors the recording; disabled legs are skipped by the judge.
+// ============================================================================
+task automatic run_SA_USB_STALL();
+    localparam int N_STALL        = 3;         // host read gaps
+    localparam int STALL_NS       = 2_000_000; // ~2 ms each ("reap gap max 2098 us")
+    localparam int RECOVER_FRAMES = 8;         // all-correct frame must reappear within this
+    localparam int SETTLE_FRAMES  = 8;
+    localparam int BETWEEN_FRAMES = 3;         // clean frames between gaps (steady-state check)
+    logic [15:0] m, f, a, d;
+`ifdef ICARUS
+    logic [47:0] tx, rx;
+`else
+    logic [7:0]  tx[0:5], rx[0:5];
+`endif
+    logic [15:0] hdr;
+    int          n_fail = 0, n_pass = 0, n_flush, dropped;
+    int          frame_no = 0, k, ch, i, all_clean, window_clean, pending;
+
+    $display("");
+    $display("[SA-USBSTALL] host USB read gaps (~%0d us) during streaming — right or flagged, and re-aligned after each gap", STALL_NS / 1000);
+
+    // ── ASIC models: unique identity on the two armed legs (5 -> ch0, 8 -> ch3) ─
+    tb_top.tail_ch[0].asic_model.data_mode = MODE_UNIQUE;
+    tb_top.tail_ch[3].asic_model.data_mode = MODE_UNIQUE;
+    hx_armed_mask = 4'h9;
+
+    // ── Bring-up as the tool did it: mask 0x9, tails 0 and 3 programmed ────────
+    tb_top.u_ft600q.send_command_frame(CMD_MAGIC, flags_wr(), REG_SPI_EN_MASK, 16'h0009);
+    tb_top.u_ft600q.wait_response_frame_typed(m, f, a, d);
+    tb_top.u_ft600q.send_command_frame(CMD_MAGIC, flags_wr(), REG_SPI_CLK_DIV, 16'h001F);
+    tb_top.u_ft600q.wait_response_frame_typed(m, f, a, d);
+    #200;
+    for (ch = 0; ch < 4; ch += 3) begin
+`ifdef ICARUS
+        tx = 48'h01_11_00_00_00_00; spi_cfg_xact(ch[1:0], tx, 3'd2, rx);   // CTRL: RO_RSTn + MCLK_EN
+        tx = 48'h02_01_00_00_00_00; spi_cfg_xact(ch[1:0], tx, 3'd2, rx);   // TELEM_EN normal
+`else
+        tx = '{8'h01, 8'h11, 8'h00, 8'h00, 8'h00, 8'h00}; spi_cfg_xact(ch[1:0], tx, 3'd2, rx);
+        tx = '{8'h02, 8'h01, 8'h00, 8'h00, 8'h00, 8'h00}; spi_cfg_xact(ch[1:0], tx, 3'd2, rx);
+`endif
+    end
+    tb_top.u_ft600q.send_command_frame(CMD_MAGIC, flags_wr(), 16'h0140, 16'h0009);   // ACQ_ALL_RUN legs 0,3
+    tb_top.u_ft600q.wait_response_frame_typed(m, f, a, d);
+`ifdef ICARUS
+    tb_top.u_ft600q.flush_tx_capture(n_flush);
+`else
+    begin logic [15:0] fw [0:4095]; tb_top.u_ft600q.flush_tx_capture(fw, n_flush); end
+`endif
+    tb_top.u_ft600q.enable_frame_trace(1'b1);
+
+    // ── Phase A: start-up — an all-clean frame within SETTLE_FRAMES ────────────
+    hx_grab_frame(hdr);
+    $display("[SA-USBSTALL] warm-up frame hdr=0x%04X discarded", hdr);
+    window_clean = 0;
+    for (i = 0; i < SETTLE_FRAMES; i++) begin
+        hx_grab_frame(hdr); frame_no++;
+        $display("[SA-USBSTALL] frame[%0d] hdr=0x%04h cnt_lo=%0d phase={%04h %04h %04h %04h}",
+                 frame_no, hdr, tb_top.u_ft600q.v3_count_lo, hx_phase[0], hx_phase[1], hx_phase[2], hx_phase[3]);
+        hx_judge_frame(frame_no, n_pass, n_fail, all_clean);
+        if (all_clean) begin window_clean = 1; break; end
+    end
+    if (window_clean) begin n_pass++; $display("[SA-USBSTALL] start-up: all-clean frame within %0d frame(s)", i + 1); end
+    else begin n_fail++; $display("[SA-USBSTALL] FAIL start-up: no all-clean frame within %0d frames", SETTLE_FRAMES); end
+
+    // ── Phase S: host read gaps ───────────────────────────────────────────────
+    for (k = 0; k < N_STALL; k++) begin
+        // steady state between gaps: every frame right-or-flagged
+        for (i = 0; i < BETWEEN_FRAMES; i++) begin
+            hx_grab_frame(hdr); frame_no++;
+            hx_judge_frame(frame_no, n_pass, n_fail, all_clean);
+        end
+        $display("[SA-USBSTALL] gap %0d: host stops reading for %0d us  t=%0t", k, STALL_NS / 1000, $time);
+        tb_top.u_ft600q.set_txe_backpressure(1'b1);
+        #STALL_NS;
+        tb_top.u_ft600q.set_txe_backpressure(1'b0);
+        $display("[SA-USBSTALL] gap %0d: host reading again  t=%0t", k, $time);
+        // Judge the first two frames delivered after the gap (where the damage
+        // shows), skip the pile a live host would have read, then require an
+        // all-correct frame within RECOVER_FRAMES.
+        pending = tb_top.u_ft600q.telem_frames_pending();
+        for (i = 0; i < 2 && i < pending - 2; i++) begin
+            hx_grab_frame(hdr); frame_no++;
+            $display("[SA-USBSTALL] frame[%0d] (after gap %0d, first) hdr=0x%04h cnt_lo=%0d phase={%04h %04h %04h %04h}",
+                     frame_no, k, hdr, tb_top.u_ft600q.v3_count_lo, hx_phase[0], hx_phase[1], hx_phase[2], hx_phase[3]);
+            hx_judge_frame(frame_no, n_pass, n_fail, all_clean);
+        end
+        tb_top.u_ft600q.keep_newest_telemetry_frames(2, dropped);
+        if (dropped > 0)
+            $display("[SA-USBSTALL]   %0d frame(s) skipped (a live host would have read them)", dropped);
+        window_clean = 0;
+        for (i = 0; i < RECOVER_FRAMES && !window_clean; i++) begin
+            hx_grab_frame(hdr); frame_no++;
+            $display("[SA-USBSTALL] frame[%0d] (after gap %0d, +%0d) hdr=0x%04h cnt_lo=%0d phase={%04h %04h %04h %04h}",
+                     frame_no, k, i, hdr, tb_top.u_ft600q.v3_count_lo, hx_phase[0], hx_phase[1], hx_phase[2], hx_phase[3]);
+            hx_judge_frame(frame_no, n_pass, n_fail, all_clean);
+            if (all_clean) window_clean = 1;
+        end
+        if (window_clean) begin
+            n_pass++;
+            $display("[SA-USBSTALL] after gap %0d: armed legs strict-correct again within %0d frame(s)", k, i);
+        end else begin
+            n_fail++;
+            $display("[SA-USBSTALL] FAIL after gap %0d: no all-correct frame within %0d frames — leg(s) left rotated by the overflow (the 2026-09-10 recording)", k, RECOVER_FRAMES);
+        end
+    end
+
+    // ── The FPGA must never write into a full FT600 ───────────────────────────
+    if (tb_top.u_ft600q.overflow_drop_count != 0) begin
+        n_fail++;
+        $display("[SA-USBSTALL] FAIL %0d word(s) written while TXE_N was high (dropped by the FT600)", tb_top.u_ft600q.overflow_drop_count);
+    end else begin
+        n_pass++;
+        $display("[SA-USBSTALL] no write into a full FT600 across %0d gaps", N_STALL);
+    end
+    if (tb_top.u_ft600q.puncture_count != 0) begin
+        n_fail += tb_top.u_ft600q.puncture_count;
+        $display("[SA-USBSTALL] FAIL %0d telemetry frame(s) punctured", tb_top.u_ft600q.puncture_count);
+    end
+
+    $display("");
+    if (n_fail == 0)
+        $display("[SA-USBSTALL] PASS — %0d checks: every leg-frame right or flagged, re-aligned after each of %0d host read gaps", n_pass, N_STALL);
+    else
+        $display("[SA-USBSTALL] FAIL — %0d check(s) failed (%0d passed): unflagged wrong data, or no re-alignment after a host read gap", n_fail, n_pass);
+    $display("RESULTS: %0d passed, %0d failed", n_pass, n_fail);
+    $display("STATUS: %0s", (n_fail == 0) ? "PASS" : "FAIL");
+endtask
+`endif  // RUN_USB_STALL
 
 `endif  // RUN_HOST_XACT

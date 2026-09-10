@@ -132,6 +132,16 @@ module ft600q_tlm #(
     int         bp_stat_events       = 0;
     int         bp_stat_cycles       = 0;
     int         bp_stat_words_stalled = 0;
+    // TXE_N write slack (2026-09-10).  The FPGA registers WR_N from the TXE_N it
+    // sampled a cycle earlier, so relative to the moment this model's buffer
+    // fills it can present up to two more words.  Hardware evidence says the
+    // real FT600 accepts them: 6,527 frames under known ~2 ms host read gaps
+    // (asic_grid_asic_20260910_101002) with crcbad=0 — its skip=9 were
+    // frame-counter gaps from the stalled engine, not lost words.  Words written
+    // while the full condition has stood for TXE_WRITE_SLACK or more cycles are
+    // dropped (that IS an FPGA defect); the first two are accepted as the device does.
+    localparam int TXE_WRITE_SLACK = 2;
+    int         txe_hi_cycles = 0;   // cycles the buffer-full condition has been asserted
     // No-puncture monitor (telemetry_v3 ISSUE 3): a 0x55AA response magic seen
     // at a NON-ZERO telemetry frame position means a ctrl response was inserted
     // inside a telemetry frame.  The typed capture is position-based, so one
@@ -287,9 +297,10 @@ module ft600q_tlm #(
             bit_err_pending     <= 1'b0;
         end else begin
             txe_n <= txe_high_any ? 1'b1 : 1'b0;
+            txe_hi_cycles <= txe_high_any ? txe_hi_cycles + 1 : 0;
 
             if (!wr_n) begin
-                if (txe_high_any) begin
+                if (txe_high_any && txe_hi_cycles >= TXE_WRITE_SLACK) begin
                     // §2.3 — overflow: FPGA wrote while buffer full, drop the word
                     overflow_drop_count <= overflow_drop_count + 1;
                     $display("[FT600Q TLM] OVERFLOW: word dropped at t=%0t (txe_n=1, wr_n=0), drop_count=%0d",

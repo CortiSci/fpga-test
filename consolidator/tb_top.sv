@@ -404,7 +404,11 @@ module tb_top;
     initial begin
         @(posedge devrst_n);
         #500;
+`ifdef RUN_USB_STALL
+        run_SA_USB_STALL();      // host USB read gaps (tests/test_host_xact.sv)
+`else
         run_SA_HOST_XACT();
+`endif
         #1000;
         $finish;
     end
