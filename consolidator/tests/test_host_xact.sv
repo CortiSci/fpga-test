@@ -49,6 +49,13 @@ logic [15:0] hx_data  [0:4095];  // frame under test (module scope: functions re
 logic [15:0] hx_phase [0:3];     // C-05: Icarus takes no unpacked-array task ports)
 int          hx_armed_mask = 4'hF;  // legs judged by hx_judge_frame (bit per leg); an
                                     // unarmed leg carries the 1023 sentinel and is skipped
+// Which phase-word flag bits EXCUSE wrong data: {par[14], ovfl[13], undf[12]}.
+// Default = all three (the original contract).  The USB-jitter scenario clears
+// bit 13: the overflow flag is STICKY for the session, so after the first host
+// gap it is set on every frame and excuses nothing a host could act on — the
+// bring-up tool conceals a leg only on undf (bit 12), exactly what the
+// 2026-09-10 11:07 recordings show (flagged == every frame, ovf=0x9 sticky).
+int          hx_excuse_mask = 3'b111;
 
 // Strict per-leg reconstruction of hx_data.  Returns the matched
 // (frame_nibble*64 + sample_offset)*16 + plane_offset, or -1.
@@ -117,7 +124,7 @@ task automatic hx_judge_leg(input int frame_no, input int uch, output int verdic
     logic [15:0] phw;
     begin
         phw     = hx_phase[uch];
-        flagged = (phw[14] | phw[13] | phw[12]) ? 1 : 0;
+        flagged = (|(phw[14:12] & hx_excuse_mask[2:0])) ? 1 : 0;
         ph      = phw & 16'h03FF;
         matched = hx_leg_match(uch);
         plane_off = (matched < 0) ? -1 : matched % 16;
@@ -450,5 +457,249 @@ task automatic run_SA_USB_STALL();
     $display("STATUS: %0s", (n_fail == 0) ? "PASS" : "FAIL");
 endtask
 `endif  // RUN_USB_STALL
+
+`ifdef RUN_USB_JITTER
+// ============================================================================
+// SA-USBJITTER — many SHORT host USB read gaps (the real host's read-loop
+// jitter) must not make the image unusable.
+//
+// The 2026-09-10 11:07 recordings (from-scratch-2 iteration 2 flashed; one leg
+// mask 0x1, then legs 5+8 mask 0x9; NO command traffic during capture; the
+// tool's own stat "reap gap max 240..589 us"): the reported phase word changed
+// every ~17 frames with one leg and every ~6 frames with two, always with the
+// undf bit set on the re-aligning leg(s), the ovf bit sticky, and the host
+// concealing 6% / 13% of all frames.  Decoding the recorded data showed the
+// phase words RIGHT for 99.8% of aligned frames — but ~1.5% of the re-align
+// events produced an UNFLAGGED frame holding the old alignment in its first
+// slots and the new one in the rest (the re-anchor happened to land on a
+// 16-slot boundary, so no slot was stuffed and undf stayed clear), the two-leg
+// run repeated the frame counter 116 times (a frame emitted faster than a
+// sweep), and both legs' phases jumped by the SAME amount at every joint
+// event.  With two legs every such event disturbs both halves of the image.
+//
+// Contract judged here (host-realistic — see hx_excuse_mask):
+//   (1) every leg-frame is strict-correct OR carries undf/par (not the sticky
+//       ovf bit): what the host conceals is what may be wrong;
+//   (2) a frame whose leg phase word differs from the previous frame's is
+//       flagged undf — a silent alignment change is the "jump";
+//   (3) the frame counter never REPEATS (a frame cannot be shorter than one
+//       sweep); it may skip (a host gap delays frames, that is honest);
+//   (4) every gap costs at most one re-alignment per leg, and the design is
+//       strict-correct again on all armed legs once the gaps stop;
+//   (5) the FPGA never writes into a full FT600, no frame is punctured.
+// Also reported (not judged): clean vs flagged leg-frames, phase changes, and
+// how the phase moved per gap, so a stability regression is visible.
+// ============================================================================
+
+`ifdef JITTER_DEBUG
+// Timeline of one leg's alignment machinery (debug only).
+reg [9:0] dbg_tick_q; reg dbg_pl0_q, dbg_pl3_q, dbg_anch0_q, dbg_anch3_q, dbg_txe_q; reg [2:0] dbg_st_q;
+always @(posedge tb_top.dut_con.engine.clk) begin
+    if (tb_top.dut_con.quad.ovf_pulse != 0)
+        $display("[DBG] t=%0t OVF legs=%b tick_cnt=%0d state=%0d cnt0=%0d cdc_full=%b",
+                 $time, tb_top.dut_con.quad.ovf_pulse, tb_top.dut_con.engine.tick_cnt, tb_top.dut_con.engine.state,
+                 tb_top.dut_con.quad.cnt0, !tb_top.dut_con.engine.telem_tx_ready);
+    if (tb_top.dut_con.ch_gen[0].strm.anchor_flush)
+        $display("[DBG] t=%0t FLUSH leg0 (re-anchor) tick_cnt=%0d state=%0d cnt0=%0d", $time,
+                 tb_top.dut_con.engine.tick_cnt, tb_top.dut_con.engine.state, tb_top.dut_con.quad.cnt0);
+    if (tb_top.dut_con.ch_gen[3].strm.anchor_flush)
+        $display("[DBG] t=%0t FLUSH leg3 (re-anchor) tick_cnt=%0d state=%0d cnt3=%0d", $time,
+                 tb_top.dut_con.engine.tick_cnt, tb_top.dut_con.engine.state, tb_top.dut_con.quad.cnt3);
+    if (tb_top.dut_con.engine.phase_locked_0 != dbg_pl0_q)
+        $display("[DBG] t=%0t leg0 aligned=%b tick_cnt=%0d phase_save=%0d anchored=%b wait_out=%b cnt0=%0d", $time,
+                 tb_top.dut_con.engine.phase_locked_0, tb_top.dut_con.engine.tick_cnt, tb_top.dut_con.engine.phase_save_0,
+                 tb_top.dut_con.engine.leg_anchored[0], tb_top.dut_con.engine.wait_out, tb_top.dut_con.quad.cnt0);
+    if (tb_top.dut_con.engine.phase_locked_3 != dbg_pl3_q)
+        $display("[DBG] t=%0t leg3 aligned=%b tick_cnt=%0d phase_save=%0d anchored=%b wait_out=%b cnt3=%0d", $time,
+                 tb_top.dut_con.engine.phase_locked_3, tb_top.dut_con.engine.tick_cnt, tb_top.dut_con.engine.phase_save_3,
+                 tb_top.dut_con.engine.leg_anchored[3], tb_top.dut_con.engine.wait_out, tb_top.dut_con.quad.cnt3);
+    if (tb_top.dut_con.engine.leg_anchored[0] != dbg_anch0_q)
+        $display("[DBG] t=%0t leg0 anchored=%b tick_cnt=%0d state=%0d", $time, tb_top.dut_con.engine.leg_anchored[0],
+                 tb_top.dut_con.engine.tick_cnt, tb_top.dut_con.engine.state);
+    if (tb_top.dut_con.engine.leg_anchored[3] != dbg_anch3_q)
+        $display("[DBG] t=%0t leg3 anchored=%b tick_cnt=%0d state=%0d", $time, tb_top.dut_con.engine.leg_anchored[3],
+                 tb_top.dut_con.engine.tick_cnt, tb_top.dut_con.engine.state);
+    if (tb_top.dut_con.engine.state == 3'd1 && dbg_st_q != 3'd1)
+        $display("[DBG] t=%0t S_HDR frame_cnt=%0d tick_2k5 phase: frame_event_pending=%b", $time,
+                 tb_top.dut_con.engine.ext_frame_cnt[15:0], tb_top.dut_con.engine.frame_event_pending);
+    if (tb_top.dut_con.engine.state == 3'd5 && dbg_st_q != 3'd5)
+        $display("[DBG] t=%0t S_PHASE_WR (frame end) undf=%b aligned=%b%b", $time, tb_top.dut_con.engine.undf_cnt,
+                 tb_top.dut_con.engine.phase_locked_3, tb_top.dut_con.engine.phase_locked_0);
+    if (tb_top.u_ft600q.txe_n != dbg_txe_q)
+        $display("[DBG] t=%0t TXE_N=%b tick_cnt=%0d state=%0d cnt0=%0d cnt3=%0d", $time, tb_top.u_ft600q.txe_n,
+                 tb_top.dut_con.engine.tick_cnt, tb_top.dut_con.engine.state, tb_top.dut_con.quad.cnt0, tb_top.dut_con.quad.cnt3);
+    if (tb_top.dut_con.engine.wait_out && tb_top.dut_con.engine.state == 3'd2 && tb_top.dut_con.engine.tick_req)
+        $display("[DBG] t=%0t WAIT_OUT tick tick_cnt=%0d must_have=%b leg_empty=%b", $time, tb_top.dut_con.engine.tick_cnt,
+                 tb_top.dut_con.engine.must_have, tb_top.dut_con.engine.leg_empty);
+    dbg_pl0_q <= tb_top.dut_con.engine.phase_locked_0; dbg_pl3_q <= tb_top.dut_con.engine.phase_locked_3;
+    dbg_anch0_q <= tb_top.dut_con.engine.leg_anchored[0]; dbg_anch3_q <= tb_top.dut_con.engine.leg_anchored[3];
+    dbg_st_q <= tb_top.dut_con.engine.state; dbg_txe_q <= tb_top.u_ft600q.txe_n;
+end
+`endif
+`ifndef JITTER_MASK
+`define JITTER_MASK 4'h9
+`endif
+task automatic run_SA_USB_JITTER();
+    localparam int N_FRAMES       = 40;         // frames judged under jitter (16 ms)
+    localparam int GAP_MIN_US     = 60;         // the CDC (512 words) + leg FIFO absorb ~56 us
+    localparam int GAP_MAX_US     = 400;        // the tool's worst per-second reap gap
+    localparam int GAP_PROB_PPM   = 40;         // per write cycle: ~1 gap per 2.5 ms of stream
+    localparam int RECOVER_FRAMES = 8;
+    localparam int SETTLE_FRAMES  = 8;
+    localparam logic [3:0] MASK   = `JITTER_MASK;
+    logic [15:0] m, f, a, d;
+`ifdef ICARUS
+    logic [47:0] tx, rx;
+`else
+    logic [7:0]  tx[0:5], rx[0:5];
+`endif
+    logic [15:0] hdr;
+    int          n_fail = 0, n_pass = 0, n_flush, dropped;
+    int          frame_no = 0, i, ch, all_clean, window_clean, v;
+    int          prev_ph [0:3];
+    int          ph_changes [0:3];
+    int          n_clean_leg = 0, n_flagged_leg = 0, n_dup = 0, n_skip = 0;
+    int          last_cnt, cnt_now, delta, gaps, gap_cycles, gap_words, armed_legs;
+
+    $display("");
+    $display("[SA-USBJITTER] short host USB read gaps (%0d..%0d us, ~1 per 2.5 ms) during streaming, legs mask=0x%01h — phase must stay right, changes flagged, no repeated frame counter",
+             GAP_MIN_US, GAP_MAX_US, MASK);
+
+    // ── ASIC models: unique identity on every leg (only armed legs are judged) ──
+    tb_top.tail_ch[0].asic_model.data_mode = MODE_UNIQUE;
+    tb_top.tail_ch[1].asic_model.data_mode = MODE_UNIQUE;
+    tb_top.tail_ch[2].asic_model.data_mode = MODE_UNIQUE;
+    tb_top.tail_ch[3].asic_model.data_mode = MODE_UNIQUE;
+    hx_armed_mask  = MASK;
+    hx_excuse_mask = 3'b101;        // undf or par excuse; the sticky ovf bit does not
+    armed_legs = 0;
+    for (ch = 0; ch < 4; ch++) if (MASK[ch]) armed_legs++;
+
+    // ── Bring-up as the tool did it ───────────────────────────────────────────
+    tb_top.u_ft600q.send_command_frame(CMD_MAGIC, flags_wr(), REG_SPI_EN_MASK, {12'h0, MASK});
+    tb_top.u_ft600q.wait_response_frame_typed(m, f, a, d);
+    tb_top.u_ft600q.send_command_frame(CMD_MAGIC, flags_wr(), REG_SPI_CLK_DIV, 16'h001F);
+    tb_top.u_ft600q.wait_response_frame_typed(m, f, a, d);
+    #200;
+    for (ch = 0; ch < 4; ch++) begin
+        if (!MASK[ch]) continue;
+`ifdef ICARUS
+        tx = 48'h01_11_00_00_00_00; spi_cfg_xact(ch[1:0], tx, 3'd2, rx);   // CTRL: RO_RSTn + MCLK_EN
+        tx = 48'h02_01_00_00_00_00; spi_cfg_xact(ch[1:0], tx, 3'd2, rx);   // TELEM_EN normal
+`else
+        tx = '{8'h01, 8'h11, 8'h00, 8'h00, 8'h00, 8'h00}; spi_cfg_xact(ch[1:0], tx, 3'd2, rx);
+        tx = '{8'h02, 8'h01, 8'h00, 8'h00, 8'h00, 8'h00}; spi_cfg_xact(ch[1:0], tx, 3'd2, rx);
+`endif
+    end
+    tb_top.u_ft600q.send_command_frame(CMD_MAGIC, flags_wr(), 16'h0140, {12'h0, MASK});   // ACQ_ALL_RUN
+    tb_top.u_ft600q.wait_response_frame_typed(m, f, a, d);
+`ifdef ICARUS
+    tb_top.u_ft600q.flush_tx_capture(n_flush);
+`else
+    begin logic [15:0] fw [0:4095]; tb_top.u_ft600q.flush_tx_capture(fw, n_flush); end
+`endif
+
+    // ── Phase A: start-up — an all-clean frame within SETTLE_FRAMES ────────────
+    hx_grab_frame(hdr);
+    $display("[SA-USBJITTER] warm-up frame hdr=0x%04X discarded", hdr);
+    window_clean = 0;
+    for (i = 0; i < SETTLE_FRAMES; i++) begin
+        hx_grab_frame(hdr); frame_no++;
+        hx_judge_frame(frame_no, n_pass, n_fail, all_clean);
+        if (all_clean) begin window_clean = 1; break; end
+    end
+    if (window_clean) begin n_pass++; $display("[SA-USBJITTER] start-up: all-clean frame within %0d frame(s)", i + 1); end
+    else begin n_fail++; $display("[SA-USBJITTER] FAIL start-up: no all-clean frame within %0d frames", SETTLE_FRAMES); end
+    for (ch = 0; ch < 4; ch++) begin prev_ph[ch] = hx_phase[ch] & 16'h03FF; ph_changes[ch] = 0; end
+    last_cnt = tb_top.u_ft600q.v3_count_lo;
+
+    // ── Phase J: random short read gaps while N_FRAMES stream ─────────────────
+    // 66 MHz FT600 clock: 15.15 ns per cycle.
+    tb_top.u_ft600q.set_txe_random_backpressure(1'b1, GAP_PROB_PPM, GAP_MIN_US * 66, GAP_MAX_US * 66);
+    for (i = 0; i < N_FRAMES; i++) begin
+        hx_grab_frame(hdr); frame_no++;
+        cnt_now = tb_top.u_ft600q.v3_count_lo;
+        delta   = (cnt_now - last_cnt) & 16'hFFFF;
+        last_cnt = cnt_now;
+        $display("[SA-USBJITTER] frame[%0d] cnt_lo=%0d (+%0d) phase={%04h %04h %04h %04h}",
+                 frame_no, cnt_now, delta, hx_phase[0], hx_phase[1], hx_phase[2], hx_phase[3]);
+        // (3) the frame counter never repeats
+        if (delta == 0) begin
+            n_dup++; n_fail++;
+            $display("[SA-USBJITTER] FAIL frame[%0d]: frame counter REPEATED (%0d) — a frame was emitted faster than one sweep (the 11:07:28 recording: dup=116)", frame_no, cnt_now);
+        end else begin
+            n_pass++;
+            if (delta > 1) n_skip += delta - 1;
+        end
+        // (1) right or flagged (undf/par), per armed leg; (2) a phase change is flagged
+        for (ch = 0; ch < 4; ch++) begin
+            if (!MASK[ch]) continue;
+            hx_judge_leg(frame_no, ch, v);
+            if (v == 2) n_fail++; else n_pass++;
+            if (v == 0) n_clean_leg++; else if (v == 1) n_flagged_leg++;
+            // An alignment CHANGE is a new phase value below 64.  1023 (no aligned
+            // data this frame) is not a change: a leg that comes back at the same
+            // phase kept its alignment.
+            if ((hx_phase[ch] & 16'h03FF) < 64 && (hx_phase[ch] & 16'h03FF) != prev_ph[ch]) begin
+                ph_changes[ch]++;
+                $display("[SA-USBJITTER] frame[%0d] leg%0d: phase %0d -> %0d (delta %0d groups)%s",
+                         frame_no, ch, prev_ph[ch], hx_phase[ch] & 16'h03FF,
+                         (prev_ph[ch] < 64) ? (((hx_phase[ch] & 16'h03FF) - prev_ph[ch]) & 63) : -1,
+                         hx_phase[ch][12] ? "" : "  <-- UNFLAGGED");
+                if (!hx_phase[ch][12]) begin
+                    n_fail++;
+                    $display("[SA-USBJITTER] FAIL frame[%0d] leg%0d: alignment changed without the undf flag — the host displays a frame that is half old, half new alignment", frame_no, ch);
+                end else n_pass++;
+                prev_ph[ch] = hx_phase[ch] & 16'h03FF;
+            end
+        end
+    end
+    tb_top.u_ft600q.set_txe_random_backpressure(1'b0, 0, 0, 0);
+    tb_top.u_ft600q.get_bp_stats(gaps, gap_cycles, gap_words);
+    $display("[SA-USBJITTER] %0d gap(s), %0d us stalled in total, %0d write(s) held off", gaps, gap_cycles / 66, gap_words);
+
+    // ── Phase R: gaps stop -> strict-correct again on every armed leg ──────────
+    window_clean = 0;
+    for (i = 0; i < RECOVER_FRAMES && !window_clean; i++) begin
+        hx_grab_frame(hdr); frame_no++;
+        hx_judge_frame(frame_no, n_pass, n_fail, all_clean);
+        if (all_clean) window_clean = 1;
+    end
+    if (window_clean) begin n_pass++; $display("[SA-USBJITTER] after the gaps: all armed legs strict-correct within %0d frame(s)", i); end
+    else begin n_fail++; $display("[SA-USBJITTER] FAIL after the gaps: no all-correct frame within %0d frames", RECOVER_FRAMES); end
+
+    // ── (4) at most one re-alignment per gap per leg ──────────────────────────
+    for (ch = 0; ch < 4; ch++) begin
+        if (!MASK[ch]) continue;
+        if (ph_changes[ch] > gaps) begin
+            n_fail++;
+            $display("[SA-USBJITTER] FAIL leg%0d: %0d phase changes for %0d gaps — the leg re-aligned more often than the host stalled", ch, ph_changes[ch], gaps);
+        end else begin
+            n_pass++;
+            $display("[SA-USBJITTER] leg%0d: %0d phase change(s) over %0d gap(s)", ch, ph_changes[ch], gaps);
+        end
+    end
+
+    // ── (5) the FPGA must never write into a full FT600; no puncture ──────────
+    if (tb_top.u_ft600q.overflow_drop_count != 0) begin
+        n_fail++;
+        $display("[SA-USBJITTER] FAIL %0d word(s) written while TXE_N was high (dropped by the FT600)", tb_top.u_ft600q.overflow_drop_count);
+    end else n_pass++;
+    if (tb_top.u_ft600q.puncture_count != 0) begin
+        n_fail += tb_top.u_ft600q.puncture_count;
+        $display("[SA-USBJITTER] FAIL %0d telemetry frame(s) punctured", tb_top.u_ft600q.puncture_count);
+    end
+
+    $display("");
+    $display("[SA-USBJITTER] stability: %0d clean / %0d flagged leg-frames of %0d under jitter; frame counter skipped %0d, repeated %0d",
+             n_clean_leg, n_flagged_leg, N_FRAMES * armed_legs, n_skip, n_dup);
+    if (n_fail == 0)
+        $display("[SA-USBJITTER] PASS — %0d checks: right or flagged, every alignment change flagged, no repeated frame counter, <=1 re-align per gap, re-aligned after the gaps", n_pass);
+    else
+        $display("[SA-USBJITTER] FAIL — %0d check(s) failed (%0d passed): unflagged wrong data, silent alignment change, repeated frame counter, or no re-alignment", n_fail, n_pass);
+    $display("RESULTS: %0d passed, %0d failed", n_pass, n_fail);
+    $display("STATUS: %0s", (n_fail == 0) ? "PASS" : "FAIL");
+endtask
+`endif  // RUN_USB_JITTER
 
 `endif  // RUN_HOST_XACT
