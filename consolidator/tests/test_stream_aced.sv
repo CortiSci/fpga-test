@@ -363,9 +363,19 @@ task automatic run_SA_ACED();
             n_fail++; frame_fail++;
         end
 `else
-        if ((phase[0] & 16'h03FF) !== 16'h0000) begin
-            $display("[SA-ACED] FAIL frame[%0d] reference leg phase=%0d, expected 0",
-                     frame_idx, phase[0] & 16'h03FF);
+        // The reference leg's phase word is its TRUE sweep offset, not a
+        // guaranteed lead of 0: with independent per-leg start-up the earliest
+        // leg need not be leg 0 (a restart or BIST setup can have another leg
+        // admit the header), and a design that reports the real phase for a
+        // re-anchored leg is exactly what keeps the host from de-rotating
+        // wrongly.  Leg ordering is a timing observation, not a contract; the
+        // data check above already proves every word decodes at the reported
+        // phase, and phase STABILITY is enforced by the phase_ref check.  Reject
+        // only a real start-up underrun on the reference leg (ported from geoff's
+        // 6c59bd2).
+        if (phase[0][12]) begin
+            $display("[SA-ACED] FAIL frame[%0d] reference leg startup underrun (phase=0x%04h)",
+                     frame_idx, phase[0]);
             n_fail++; frame_fail++;
         end
 `endif

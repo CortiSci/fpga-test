@@ -10,7 +10,12 @@
 //
 // The in-band detector for that condition is the per-word EVEN-PARITY check in
 // spi_ch_stream.v (START=1, 16 data bits MSB-first, even parity). This bench
-// drives the module directly and asserts:
+// drives the module directly.  The receiver is MARKER-ANCHORED (2026-09-09):
+// it delivers nothing until the tail's sweep marker — a parity-inverted word
+// on the 16-word boundary — and that word itself is sweep word 0.  So every
+// scenario first anchors the DUT (anchor_dut) and then places its test word
+// OFF the boundary, where a bad parity bit is a genuine error, not a marker.
+// par_err_flag is a one-cycle pulse, latched here into pe_seen.  It asserts:
 //   TC-LF-01  healthy stream (parity = ^data)     -> par_err_flag stays 0
 //   TC-LF-02  single bad-parity word              -> par_err_flag asserts
 //   TC-LF-03  floating leg (random data + parity) -> par_err trips ~50% of words
@@ -41,6 +46,7 @@ module tb_link_fault;
     integer     n_pass;
     integer     n_fail;
     integer     wv_count;      // word_valid pulses since last clear
+    reg         pe_seen;       // par_err_flag pulse seen since last clear
     integer     i;
     integer     trip_count;
     reg  [15:0] d;
@@ -73,17 +79,31 @@ module tb_link_fault;
             last_word <= word_data;
         end
     end
+    always @(posedge sclk) if (rst_n && par_err_flag) pe_seen <= 1'b1;
 
     // ---- helpers -----------------------------------------------------------
     // Reset the DUT and leave it armed in S_WAIT, ready for a START bit.
     task arm_dut;
         begin
             @(negedge sclk); rst_n = 1'b0; miso_in = 1'b0; run = 1'b1; cfg_hold = 1'b0;
-            wv_count = 0; last_word = 16'h0000;
+            wv_count = 0; last_word = 16'h0000; pe_seen = 1'b0;
             repeat (3) @(negedge sclk);
             rst_n = 1'b1;
             // S_IDLE -> S_ARM (3) -> S_WAIT: settle margin
             repeat (8) @(negedge sclk);
+        end
+    endtask
+
+    // Arm, then deliver the sweep marker (0x0000 has even parity 0; sending 1
+    // inverts it on the boundary) so the receiver anchors and delivers.  Clear
+    // the counters after it so each TC counts only its own words; the next
+    // word lands at wcnt==1.
+    task anchor_dut;
+        begin
+            arm_dut;
+            send_word(16'h0000, 1'b1);
+            repeat (3) @(negedge sclk);
+            wv_count = 0; last_word = 16'h0000; pe_seen = 1'b0;
         end
     endtask
 
@@ -117,31 +137,31 @@ module tb_link_fault;
         wv_count = 0; last_word = 16'h0000;
 
         // -- TC-LF-01: healthy stream, correct even parity -> no par_err ------
-        arm_dut;
+        anchor_dut;
         for (i = 0; i < 32; i = i + 1) begin
             d    = i[15:0] ^ 16'hA5C3;      // varied, deterministic data
             pbit = ^d;                      // even parity: parity = XOR of data
             send_word(d, pbit);
         end
-        check(par_err_flag === 1'b0, "TC-LF-01-parity-clean");
+        check(pe_seen === 1'b0,      "TC-LF-01-parity-clean");
         check(wv_count == 32,        "TC-LF-01-all-words-received");
         check(last_word == ((31 ^ 16'hA5C3)), "TC-LF-01-data-integrity");
 
-        // -- TC-LF-02: one word with WRONG parity -> detector asserts ---------
-        arm_dut;
+        // -- TC-LF-02: one word with WRONG parity (off the boundary) -> asserts
+        anchor_dut;
         d = 16'h1234; send_word(d, ~(^d));  // deliberately inverted parity
-        check(par_err_flag === 1'b1, "TC-LF-02-bad-parity-detected");
+        check(pe_seen === 1'b1,      "TC-LF-02-bad-parity-detected");
 
         // -- TC-LF-03: floating leg (random data + random parity) -------------
         // Faithful model of the hardware failure. Each word is reset-isolated
         // so we can measure the trip RATE; a floating leg trips ~50% of words.
         trip_count = 0;
         for (i = 0; i < 64; i = i + 1) begin
-            arm_dut;
+            anchor_dut;
             d    = $random;
             pbit = $random;                 // parity independent of data
             send_word(d, pbit);
-            if (par_err_flag === 1'b1) trip_count = trip_count + 1;
+            if (pe_seen) trip_count = trip_count + 1;
         end
         $display("[TC-LF-03] floating-leg parity trips: %0d / 64", trip_count);
         // Healthy = 0; floating trips near 32. Loose bound never flakes but is
@@ -149,18 +169,18 @@ module tb_link_fault;
         check(trip_count >= 16, "TC-LF-03-floating-leg-detected");
 
         // -- TC-LF-04: SD stuck HIGH -> START seen, data=0xFFFF, par_err ------
-        arm_dut;
+        anchor_dut;
         @(negedge sclk); miso_in = 1'b1;    // hold high forever
-        repeat (20) @(negedge sclk);        // START + 16 data(=1) + parity(=1)
+        repeat (24) @(negedge sclk);        // START + 16 data(=1) + parity(=1) + latch margin
         check(word_data === 16'hFFFF, "TC-LF-04-stuck-high-data");
-        check(par_err_flag === 1'b1,  "TC-LF-04-stuck-high-detected");
+        check(pe_seen === 1'b1,       "TC-LF-04-stuck-high-detected");
 
         // -- TC-LF-05: SD stuck LOW -> no START, dead leg (no word_valid) -----
         arm_dut;
         @(negedge sclk); miso_in = 1'b0;    // hold low forever
         repeat (40) @(negedge sclk);
         check(wv_count == 0,          "TC-LF-05-stuck-low-no-data");
-        check(par_err_flag === 1'b0,  "TC-LF-05-stuck-low-no-false-parity");
+        check(pe_seen === 1'b0,       "TC-LF-05-stuck-low-no-false-parity");
 
         // ---- verdict --------------------------------------------------------
         $display("RESULTS: %0d passed, %0d failed", n_pass, n_fail);
