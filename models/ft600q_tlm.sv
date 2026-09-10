@@ -206,12 +206,23 @@ module ft600q_tlm #(
                 // same clock period as the last RD_N dequeue — there is no delta
                 // in hardware.  Without this, the NBA here makes it visible to the
                 // FPGA one cycle too late, masking the READ_POST capture bug in sim.
+                // §2.2: a packet boundary after THIS dequeue.  A real FT600Q
+                // has nothing beyond the boundary in its FIFO yet, so RXF_N
+                // goes high in the same clock as that dequeue and no next word
+                // is pre-driven.  (Until 2026-09-10 the gap took effect one
+                // cycle late and the next packet's first word was pre-driven
+                // across it: the FPGA's READ_POST capture took that word early
+                // and it arrived twice, leaving the command decoder one word
+                // off for every following command — a model artefact, never
+                // seen on hardware.)
                 begin : rxf_count_la
                     int count_after;
+                    logic gap_now;
+                    gap_now = (rxf_words_per_pkt > 0) && !oe_n && !rd_n && rx_count() > 0 &&
+                              (rxf_words_delivered + 1 >= rxf_words_per_pkt);
                     count_after = rx_count() -
                                   ((!oe_n && !rd_n && rx_count() > 0) ? 1 : 0);
-                    rxf_n <= (count_after == 0) ? 1'b1 : 1'b0;
-                end
+                    rxf_n <= (count_after == 0 || gap_now) ? 1'b1 : 1'b0;
 
                 if (!oe_n && !rd_n && rx_count() > 0) begin
                     // RD phase: advance pointer and immediately load the NEXT
@@ -221,7 +232,7 @@ module ft600q_tlm #(
                     // edge as the dequeue; NBA semantics require showing the
                     // next word now so the FPGA reads the correct one next cycle.
                     rx_rd_ptr <= rx_rd_ptr + 1;
-                    d_drive   <= (rx_count() > 1)
+                    d_drive   <= (rx_count() > 1 && !gap_now)
                                     ? rx_queue[(rx_rd_ptr[7:0] + 1'b1)]
                                     : 16'h0;
                     be_drive  <= 2'b11;
@@ -229,7 +240,7 @@ module ft600q_tlm #(
 
                     // §2.2: track words delivered; start gap when packet boundary reached
                     if (rxf_words_per_pkt > 0) begin
-                        if (rxf_words_delivered + 1 >= rxf_words_per_pkt) begin
+                        if (gap_now) begin
                             rxf_words_delivered <= 0;
                             rxf_gap_remain      <= rxf_gap_cycles;
                         end else begin
@@ -247,6 +258,7 @@ module ft600q_tlm #(
                 end else if (oe_n) begin
                     drive_d <= 1'b0;
                 end
+                end  // rxf_count_la
             end
         end
     end

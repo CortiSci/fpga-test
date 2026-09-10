@@ -413,6 +413,10 @@ module tb_top;
         run_SA_USB_STALL();      // host USB read gaps (tests/test_host_xact.sv)
 `elsif RUN_USB_STALL_CMDS
         run_SA_USB_STALL_CMDS(); // commands issued while the host is not reading (tests/test_host_xact.sv)
+`elsif RUN_FAULT_MID_CMD
+        run_FAULT_MID_CMD();     // fault frame while a command arrives / is half-received (tests/test_host_xact.sv)
+`elsif RUN_STREAM_DIES
+        run_STREAM_DIES();       // tails go silent with RUN set: host still answered (tests/test_host_xact.sv)
 `else
         run_SA_HOST_XACT();
 `endif

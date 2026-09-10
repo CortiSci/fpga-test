@@ -306,6 +306,382 @@ task automatic run_SA_HOST_XACT();
     $display("STATUS: %0s", (n_fail == 0) ? "PASS" : "FAIL");
 endtask
 
+`ifdef RUN_STREAM_DIES
+// ---------------------------------------------------------------------------
+// STREAM-DIES — the tails go silent while RUN is set; the host must still be
+// answered.  2026-09-10 15:04:37 (sequential impedance sweep, bring-up log):
+// after a RUN whose capture delivered 0 frames, the CH_CTRL read got no
+// response, nor did anything after it, and 15 s later FT_WritePipe timed out —
+// the consolidator had stopped answering AND stopped reading commands; only a
+// reconnect recovered it.  telem_engine_v3 was mid-frame with every anchored
+// leg empty: its dead-leg escape needed `progress`, so the frame never ended,
+// framer_busy stayed high and every response sat in ST_TX_WAIT.
+//   0. RUN with the tails never streaming (TELEM_EN off): a register read is
+//      answered, RUN=0 is answered.
+//   1. Two legs streaming and aligned; both tails' MCLK is switched off by a
+//      CTRL write (the ASIC clock stops, MISO goes idle): within 2 ms a register
+//      read must be answered, RUN=0 must be answered; MCLK back on + RUN → the
+//      stream is strict-correct again within SETTLE_FRAMES.
+// ---------------------------------------------------------------------------
+// A WRITE-mode cfg transaction (rw=1): the only kind a streaming leg accepts
+// (reads and passthroughs to a running leg are rejected — fault bit 4).
+// 2 bytes: opcode + data.  ~25 us at the divided clock; wait 100 us.
+task automatic cfg_write2(input logic [1:0] c, input logic [7:0] b0, input logic [7:0] b1);
+    logic [15:0] mm, ff, aa, dd;
+    tb_top.u_ft600q.send_command_frame(CMD_MAGIC, flags_wr(), 16'h0030, {b0, b1});
+    tb_top.u_ft600q.wait_response_frame_typed(mm, ff, aa, dd);
+    tb_top.u_ft600q.send_command_frame(CMD_MAGIC, flags_wr(), 16'h0031, spi_cfg_ctrl_word(c, 1'b1, 1'b1, 3'd2));
+    tb_top.u_ft600q.wait_response_frame_typed(mm, ff, aa, dd);
+    #100_000;
+endtask
+
+task automatic run_STREAM_DIES();
+    localparam int SETTLE_FRAMES = 8;
+    logic [15:0] m, f, a, d;
+`ifdef ICARUS
+    logic [47:0] tx, rx;
+`else
+    logic [7:0]  tx[0:5], rx[0:5];
+`endif
+    logic [15:0] hdr;
+    int          n_fail = 0, n_pass = 0, n_flush, ch, i, all_clean, window_clean, frame_no = 0, dropped, words;
+
+
+    $display("");
+    $display("[STREAM-DIES] tails silent while RUN is set: the host must still be answered, RUN=0 must take, the stream must come back");
+
+    tb_top.tail_ch[0].asic_model.data_mode = MODE_UNIQUE;
+    tb_top.tail_ch[3].asic_model.data_mode = MODE_UNIQUE;
+    hx_armed_mask = 4'h9;
+
+    tb_top.u_ft600q.send_command_frame(CMD_MAGIC, flags_wr(), REG_SPI_EN_MASK, 16'h0009);
+    tb_top.u_ft600q.wait_response_frame_typed(m, f, a, d);
+    tb_top.u_ft600q.send_command_frame(CMD_MAGIC, flags_wr(), REG_SPI_CLK_DIV, 16'h001F);
+    tb_top.u_ft600q.wait_response_frame_typed(m, f, a, d);
+    #200;
+    // Tails clocked and out of reset, but NOT streaming (no TELEM_EN yet).
+    for (ch = 0; ch < 4; ch += 3) begin
+`ifdef ICARUS
+        tx = 48'h01_11_00_00_00_00; spi_cfg_xact(ch[1:0], tx, 3'd2, rx);
+`else
+        tx = '{8'h01, 8'h11, 8'h00, 8'h00, 8'h00, 8'h00}; spi_cfg_xact(ch[1:0], tx, 3'd2, rx);
+`endif
+    end
+
+    // ── Phase 0: RUN with tails that never stream ────────────────────────────
+    $display("[STREAM-DIES] phase 0: RUN on legs 0,3 with the tails not streaming  t=%0t", $time);
+    tb_top.u_ft600q.send_command_frame(CMD_MAGIC, flags_wr(), 16'h0140, 16'h0009);   // ACQ_ALL_RUN legs 0,3
+    tb_top.u_ft600q.wait_response_frame_typed(m, f, a, d);
+    #1_000_000;                                                                        // 1 ms
+`ifdef ICARUS
+    tb_top.u_ft600q.flush_tx_capture(n_flush);
+`else
+    begin logic [15:0] fw [0:4095]; tb_top.u_ft600q.flush_tx_capture(fw, n_flush); end
+`endif
+    tb_top.u_ft600q.enable_frame_trace(1'b1);
+    tb_top.u_ft600q.send_command_frame(CMD_MAGIC, flags_rd(), REG_TOKEN_HI, 16'h0000);
+    #2_000_000;
+    words = tb_top.u_ft600q.ctrl_wr_ptr - tb_top.u_ft600q.ctrl_rd_ptr;
+    if (words < 4) begin n_fail++; $display("[STREAM-DIES] FAIL phase 0: TOKEN_HI read not answered within 2 ms while RUN is set on silent tails (%0d ctrl words)", words); end
+    else begin
+        tb_top.u_ft600q.wait_response_frame_typed(m, f, a, d);
+        if (a !== REG_TOKEN_HI || d !== 16'hCEFA) begin n_fail++; $display("[STREAM-DIES] FAIL phase 0: response {%04h %04h %04h %04h}", m, f, a, d); end
+        else begin n_pass++; $display("[STREAM-DIES] phase 0: read answered while RUN is set on silent tails"); end
+    end
+    while ((tb_top.u_ft600q.ctrl_wr_ptr - tb_top.u_ft600q.ctrl_rd_ptr) >= 4) begin
+        tb_top.u_ft600q.wait_response_frame_typed(m, f, a, d);
+        $display("[STREAM-DIES]   phase 0 extra ctrl packet {%04h %04h %04h %04h}", m, f, a, d);
+    end
+    tb_top.u_ft600q.send_command_frame(CMD_MAGIC, flags_wr(), 16'h0140, 16'h0000);   // RUN off
+    #1_000_000;
+    if ((tb_top.u_ft600q.ctrl_wr_ptr - tb_top.u_ft600q.ctrl_rd_ptr) < 4) begin n_fail++; $display("[STREAM-DIES] FAIL phase 0: RUN=0 not answered within 1 ms"); end
+    else begin tb_top.u_ft600q.wait_response_frame_typed(m, f, a, d); n_pass++; end
+    $display("[STREAM-DIES] phase 0: %0d telemetry frame(s) were emitted with no tail streaming", tb_top.u_ft600q.telem_frames_pending());
+    tb_top.u_ft600q.keep_newest_telemetry_frames(0, dropped);
+
+    // ── Phase 1: streaming, then the tails go silent mid-run ─────────────────
+    for (ch = 0; ch < 4; ch += 3) begin
+`ifdef ICARUS
+        tx = 48'h02_01_00_00_00_00; spi_cfg_xact(ch[1:0], tx, 3'd2, rx);   // TELEM_EN normal
+`else
+        tx = '{8'h02, 8'h01, 8'h00, 8'h00, 8'h00, 8'h00}; spi_cfg_xact(ch[1:0], tx, 3'd2, rx);
+`endif
+    end
+    tb_top.u_ft600q.send_command_frame(CMD_MAGIC, flags_wr(), 16'h0140, 16'h0009);
+    tb_top.u_ft600q.wait_response_frame_typed(m, f, a, d);
+    hx_grab_frame(hdr);
+    window_clean = 0;
+    for (i = 0; i < SETTLE_FRAMES; i++) begin
+        hx_grab_frame(hdr); frame_no++;
+        hx_judge_frame(frame_no, n_pass, n_fail, all_clean);
+        if (all_clean) begin window_clean = 1; break; end
+    end
+    if (window_clean) n_pass++;
+    else begin n_fail++; $display("[STREAM-DIES] FAIL phase 1 start-up: no all-clean frame within %0d frames", SETTLE_FRAMES); end
+
+    $display("[STREAM-DIES] phase 1: MCLK off on both streaming tails (ASIC clock stops, MISO idle)  t=%0t", $time);
+    cfg_write2(2'd0, 8'h01, 8'h01);   // CTRL: RO_RSTn=1, MCLK_EN=0
+    cfg_write2(2'd3, 8'h01, 8'h01);
+    #2_000_000;                       // 2 ms = 5 frame times of silence
+    tb_top.u_ft600q.keep_newest_telemetry_frames(0, dropped);
+    tb_top.u_ft600q.send_command_frame(CMD_MAGIC, flags_rd(), REG_TOKEN_HI, 16'h0000);
+    #2_000_000;
+    words = tb_top.u_ft600q.ctrl_wr_ptr - tb_top.u_ft600q.ctrl_rd_ptr;
+    if (words < 4) begin
+        n_fail++;
+        $display("[STREAM-DIES] FAIL phase 1: TOKEN_HI read not answered within 2 ms after the tails went silent — framer_busy stuck on an unfinishable frame (the 15:04:37 sweep hang)");
+    end else begin
+        tb_top.u_ft600q.wait_response_frame_typed(m, f, a, d);
+        if (a !== REG_TOKEN_HI || d !== 16'hCEFA) begin n_fail++; $display("[STREAM-DIES] FAIL phase 1: response {%04h %04h %04h %04h}", m, f, a, d); end
+        else begin n_pass++; $display("[STREAM-DIES] phase 1: read answered with the tails silent and RUN set"); end
+    end
+    while ((tb_top.u_ft600q.ctrl_wr_ptr - tb_top.u_ft600q.ctrl_rd_ptr) >= 4) begin
+        tb_top.u_ft600q.wait_response_frame_typed(m, f, a, d);
+        $display("[STREAM-DIES]   phase 1 extra ctrl packet {%04h %04h %04h %04h}", m, f, a, d);
+    end
+    tb_top.u_ft600q.send_command_frame(CMD_MAGIC, flags_wr(), 16'h0140, 16'h0000);   // RUN off
+    #1_000_000;
+    if ((tb_top.u_ft600q.ctrl_wr_ptr - tb_top.u_ft600q.ctrl_rd_ptr) < 4) begin n_fail++; $display("[STREAM-DIES] FAIL phase 1: RUN=0 not answered within 1 ms"); end
+    else begin tb_top.u_ft600q.wait_response_frame_typed(m, f, a, d); n_pass++; $display("[STREAM-DIES] phase 1: RUN=0 answered"); end
+    $display("[STREAM-DIES] phase 1: %0d telemetry frame(s) emitted after the tails went silent", tb_top.u_ft600q.telem_frames_pending());
+    tb_top.u_ft600q.keep_newest_telemetry_frames(0, dropped);
+
+    // ── Phase 2: clocks back, RUN again — the stream must come back clean ────
+    cfg_write2(2'd0, 8'h01, 8'h11);
+    cfg_write2(2'd3, 8'h01, 8'h11);
+    tb_top.u_ft600q.send_command_frame(CMD_MAGIC, flags_wr(), 16'h0140, 16'h0009);
+    tb_top.u_ft600q.wait_response_frame_typed(m, f, a, d);
+    hx_grab_frame(hdr);
+    window_clean = 0;
+    for (i = 0; i < SETTLE_FRAMES; i++) begin
+        hx_grab_frame(hdr); frame_no++;
+        hx_judge_frame(frame_no, n_pass, n_fail, all_clean);
+        if (all_clean) begin window_clean = 1; break; end
+    end
+    if (window_clean) begin n_pass++; $display("[STREAM-DIES] phase 2: stream strict-correct again within %0d frame(s)", i + 1); end
+    else begin n_fail++; $display("[STREAM-DIES] FAIL phase 2: no all-clean frame within %0d frames after the clocks returned", SETTLE_FRAMES); end
+
+    if (tb_top.u_ft600q.puncture_count != 0) begin
+        n_fail += tb_top.u_ft600q.puncture_count;
+        $display("[STREAM-DIES] FAIL %0d telemetry frame(s) punctured", tb_top.u_ft600q.puncture_count);
+    end
+
+    $display("");
+    if (n_fail == 0) $display("[STREAM-DIES] PASS — %0d checks: silent tails never wedge the command path; the stream returns", n_pass);
+    else             $display("[STREAM-DIES] FAIL — %0d check(s) failed (%0d passed)", n_fail, n_pass);
+    $display("RESULTS: %0d passed, %0d failed", n_pass, n_fail);
+    $display("STATUS: %0s", (n_fail == 0) ? "PASS" : "FAIL");
+endtask
+`endif  // RUN_STREAM_DIES
+
+`ifdef RUN_FAULT_MID_CMD
+// ---------------------------------------------------------------------------
+// FAULT-MID-CMD — a fault frame must never cost the host a command.
+// 2026-09-10 14:51:01 and 14:51:04 (bring-up log): the tool's passthrough
+// request to a streaming leg was rejected by the consolidator (fault bit 4,
+// cfg_spi_collision) and the very next register read got no response for
+// 3 s.  cmd_decoder dispatched the fault frame with rx_ready still high, so
+// the read's four words were popped from the command FIFO while the frame
+// waited for the telemetry boundary — silently gone.  Two shapes, while two
+// legs stream (so the fault frame really does wait up to a frame):
+//   A. fault, then a command sent immediately (arrives during the fault frame);
+//   B. a command delivered in two halves with the fault inside the gap
+//      (the decoder is mid-command when the fault becomes pending).
+// Contract: exactly one fault frame {55AA FFFF 0001 0000} AND the correct
+// response (A: fault first; B: the half-received command completes first);
+// TOKEN_HI untouched; the stream stays right-or-flagged.
+// ---------------------------------------------------------------------------
+task automatic run_FAULT_MID_CMD();
+    localparam int N_ITER        = 2;
+    localparam int SETTLE_FRAMES = 8;
+    localparam int WAIT_FRAMES   = 6;      // both packets must be in by then
+    logic [15:0] m, f, a, d;
+`ifdef ICARUS
+    logic [47:0] tx, rx;
+`else
+    logic [7:0]  tx[0:5], rx[0:5];
+`endif
+    logic [15:0] hdr;
+    int          n_fail = 0, n_pass = 0, n_flush, ch, i, k, shape, all_clean, window_clean, frame_no = 0, words, dropped;
+
+    $display("");
+    $display("[FAULT-MID-CMD] a fault frame dispatched while a command arrives / is half-received must not lose the command");
+
+    tb_top.tail_ch[0].asic_model.data_mode = MODE_UNIQUE;
+    tb_top.tail_ch[3].asic_model.data_mode = MODE_UNIQUE;
+    hx_armed_mask = 4'h9;
+
+    tb_top.u_ft600q.send_command_frame(CMD_MAGIC, flags_wr(), REG_SPI_EN_MASK, 16'h0009);
+    tb_top.u_ft600q.wait_response_frame_typed(m, f, a, d);
+    tb_top.u_ft600q.send_command_frame(CMD_MAGIC, flags_wr(), REG_SPI_CLK_DIV, 16'h001F);
+    tb_top.u_ft600q.wait_response_frame_typed(m, f, a, d);
+    #200;
+    for (ch = 0; ch < 4; ch += 3) begin
+`ifdef ICARUS
+        tx = 48'h01_11_00_00_00_00; spi_cfg_xact(ch[1:0], tx, 3'd2, rx);
+        tx = 48'h02_01_00_00_00_00; spi_cfg_xact(ch[1:0], tx, 3'd2, rx);
+`else
+        tx = '{8'h01, 8'h11, 8'h00, 8'h00, 8'h00, 8'h00}; spi_cfg_xact(ch[1:0], tx, 3'd2, rx);
+        tx = '{8'h02, 8'h01, 8'h00, 8'h00, 8'h00, 8'h00}; spi_cfg_xact(ch[1:0], tx, 3'd2, rx);
+`endif
+    end
+    tb_top.u_ft600q.send_command_frame(CMD_MAGIC, flags_wr(), 16'h0140, 16'h0009);   // ACQ_ALL_RUN legs 0,3
+    tb_top.u_ft600q.wait_response_frame_typed(m, f, a, d);
+`ifdef ICARUS
+    tb_top.u_ft600q.flush_tx_capture(n_flush);
+`else
+    begin logic [15:0] fw [0:4095]; tb_top.u_ft600q.flush_tx_capture(fw, n_flush); end
+`endif
+    tb_top.u_ft600q.enable_frame_trace(1'b1);
+
+    hx_grab_frame(hdr);
+    window_clean = 0;
+    for (i = 0; i < SETTLE_FRAMES; i++) begin
+        hx_grab_frame(hdr); frame_no++;
+        hx_judge_frame(frame_no, n_pass, n_fail, all_clean);
+        if (all_clean) begin window_clean = 1; break; end
+    end
+    if (window_clean) n_pass++;
+    else begin n_fail++; $display("[FAULT-MID-CMD] FAIL start-up: no all-clean frame within %0d frames", SETTLE_FRAMES); end
+
+    // Pre-check for shape B: a command delivered in two halves with NO fault
+    // must simply be answered (pins the RXF-gap handling on its own).
+    tb_top.u_ft600q.set_rxf_packet_gap(2, 20_000);
+    tb_top.u_ft600q.send_command_frame(CMD_MAGIC, flags_rd(), REG_TOKEN_HI, 16'h0000);
+    for (i = 0; i < WAIT_FRAMES && (tb_top.u_ft600q.ctrl_wr_ptr - tb_top.u_ft600q.ctrl_rd_ptr) < 4; i++) begin
+        hx_grab_frame(hdr); frame_no++;
+        hx_judge_frame(frame_no, n_pass, n_fail, all_clean);
+    end
+    tb_top.u_ft600q.set_rxf_packet_gap(0, 12);
+    words = tb_top.u_ft600q.ctrl_wr_ptr - tb_top.u_ft600q.ctrl_rd_ptr;
+    if (words != 4) begin
+        n_fail++;
+        $display("[FAULT-MID-CMD] FAIL pre-check: split (2+2 words, no fault) TOKEN_HI read -> %0d ctrl word(s) within %0d frames (expected exactly the response)", words, WAIT_FRAMES);
+        while ((tb_top.u_ft600q.ctrl_wr_ptr - tb_top.u_ft600q.ctrl_rd_ptr) >= 4) begin
+            tb_top.u_ft600q.wait_response_frame_typed(m, f, a, d);
+            $display("[FAULT-MID-CMD]   got {%04h %04h %04h %04h}", m, f, a, d);
+        end
+    end else begin
+        tb_top.u_ft600q.wait_response_frame_typed(m, f, a, d);
+        if (m !== 16'h55AA || a !== REG_TOKEN_HI || d !== 16'hCEFA) begin n_fail++; $display("[FAULT-MID-CMD] FAIL pre-check: split read answered {%04h %04h %04h %04h}", m, f, a, d); end
+        else begin n_pass++; $display("[FAULT-MID-CMD] pre-check: a command split 2+2 by an RXF gap is answered normally"); end
+    end
+    // and a plain read right after it, to prove the decoder is still aligned
+    tb_top.u_ft600q.send_command_frame(CMD_MAGIC, flags_rd(), REG_TOKEN_HI, 16'h0000);
+    for (i = 0; i < WAIT_FRAMES && (tb_top.u_ft600q.ctrl_wr_ptr - tb_top.u_ft600q.ctrl_rd_ptr) < 4; i++) begin
+        hx_grab_frame(hdr); frame_no++;
+        hx_judge_frame(frame_no, n_pass, n_fail, all_clean);
+    end
+    if ((tb_top.u_ft600q.ctrl_wr_ptr - tb_top.u_ft600q.ctrl_rd_ptr) < 4) begin
+        n_fail++; $display("[FAULT-MID-CMD] FAIL pre-check: the read AFTER the split command got no response — decoder left misaligned by the split (words consumed: rx_rd=%0d)", tb_top.u_ft600q.rx_rd_ptr);
+        $display("RESULTS: %0d passed, %0d failed", n_pass, n_fail); $display("STATUS: FAIL"); return;
+    end else begin
+        tb_top.u_ft600q.wait_response_frame_typed(m, f, a, d);
+        if (d !== 16'hCEFA) begin n_fail++; $display("[FAULT-MID-CMD] FAIL pre-check: follow-up read {%04h %04h %04h %04h}", m, f, a, d); end
+        else n_pass++;
+    end
+    tb_top.u_ft600q.keep_newest_telemetry_frames(2, dropped);
+
+    for (shape = 0; shape < 2; shape++) begin
+        for (k = 0; k < N_ITER; k++) begin
+            hx_grab_frame(hdr); frame_no++;
+            hx_judge_frame(frame_no, n_pass, n_fail, all_clean);
+            if (shape == 0) begin
+                // A: fault first, command right behind it — the command lands
+                //    while the fault frame waits for the telemetry boundary.
+                $display("[FAULT-MID-CMD] A%0d: FAULTN low, TOKEN_HI read 2 us later  t=%0t", k, $time);
+                faultn_tb = 1'b0;
+                #2_000;
+                tb_top.u_ft600q.send_command_frame(CMD_MAGIC, flags_rd(), REG_TOKEN_HI, 16'h0000);
+            end else begin
+                // B: command in two halves (RXF gap after 2 words), fault inside the gap.
+                $display("[FAULT-MID-CMD] B%0d: TOKEN_HI read split 2+2 words, FAULTN low in the gap  t=%0t", k, $time);
+                tb_top.u_ft600q.set_rxf_packet_gap(2, 20_000);        // ~300 us gap at 66 MHz
+                tb_top.u_ft600q.send_command_frame(CMD_MAGIC, flags_rd(), REG_TOKEN_HI, 16'h0000);
+                #30_000;                                               // first half consumed by now
+                if (tb_top.u_ft600q.rx_count() != 2) begin
+                    n_fail++;
+                    $display("[FAULT-MID-CMD] B%0d: SETUP FAIL — %0d word(s) still queued, expected 2 (gap not in effect)", k, tb_top.u_ft600q.rx_count());
+                end else n_pass++;
+                faultn_tb = 1'b0;
+                #2_000;
+            end
+            // Both packets must appear within WAIT_FRAMES of stream; keep judging the stream.
+            for (i = 0; i < WAIT_FRAMES && (tb_top.u_ft600q.ctrl_wr_ptr - tb_top.u_ft600q.ctrl_rd_ptr) < 8; i++) begin
+                hx_grab_frame(hdr); frame_no++;
+                hx_judge_frame(frame_no, n_pass, n_fail, all_clean);
+            end
+            faultn_tb = 1'b1;
+            if (shape == 1) tb_top.u_ft600q.set_rxf_packet_gap(0, 12);
+            words = tb_top.u_ft600q.ctrl_wr_ptr - tb_top.u_ft600q.ctrl_rd_ptr;
+            if (words < 8) begin
+                n_fail++;
+                $display("[FAULT-MID-CMD] FAIL %s%0d: %0d ctrl word(s) within %0d frames — expected the fault frame AND the response (8 words); the command was swallowed by the fault dispatch",
+                         (shape == 0) ? "A" : "B", k, words, WAIT_FRAMES);
+                while ((tb_top.u_ft600q.ctrl_wr_ptr - tb_top.u_ft600q.ctrl_rd_ptr) >= 4) begin
+                    tb_top.u_ft600q.wait_response_frame_typed(m, f, a, d);
+                    $display("[FAULT-MID-CMD]   got {%04h %04h %04h %04h}", m, f, a, d);
+                end
+            end else begin
+                // Order: A = the fault was pending before the command arrived, so
+                // the fault frame goes first; B = the fault became pending while the
+                // command was half-received, so the command completes first and the
+                // fault frame follows.  Either way BOTH must be present and correct.
+                begin : two_packets
+                    logic got_fault, got_resp;
+                    int p;
+                    got_fault = 0; got_resp = 0;
+                    for (p = 0; p < 2; p++) begin
+                        tb_top.u_ft600q.wait_response_frame_typed(m, f, a, d);
+                        if (m === 16'h55AA && f === 16'hFFFF) begin
+                            if (a[0] !== 1'b1 || d !== 16'h0000) begin n_fail++; $display("[FAULT-MID-CMD] FAIL %s%0d: fault frame {%04h %04h %04h %04h} lacks the FAULT_N bit", (shape == 0) ? "A" : "B", k, m, f, a, d); end
+                            else begin
+                                got_fault = 1;
+                                if ((shape == 0 && p != 0) || (shape == 1 && p != 1)) begin n_fail++; $display("[FAULT-MID-CMD] FAIL %s%0d: fault frame arrived as packet %0d (expected %0d)", (shape == 0) ? "A" : "B", k, p, (shape == 0) ? 0 : 1); end
+                            end
+                        end else if (m === 16'h55AA && f === 16'h0000 && a === REG_TOKEN_HI && d === 16'hCEFA) begin
+                            got_resp = 1;
+                        end else begin
+                            n_fail++; $display("[FAULT-MID-CMD] FAIL %s%0d: packet %0d {%04h %04h %04h %04h} is neither the fault frame nor {55AA 0000 %04h CEFA} (a read that decodes as a WRITE shows flags=FFFF / wrong data)", (shape == 0) ? "A" : "B", k, p, m, f, a, d, REG_TOKEN_HI);
+                        end
+                    end
+                    if (got_fault && got_resp) begin
+                        n_pass++;
+                        $display("[FAULT-MID-CMD] %s%0d: fault frame and correct response both delivered (%s first), %0d frame(s)", (shape == 0) ? "A" : "B", k, (shape == 0) ? "fault" : "response", i);
+                    end else begin
+                        n_fail++; $display("[FAULT-MID-CMD] FAIL %s%0d: fault frame %0d, response %0d", (shape == 0) ? "A" : "B", k, got_fault, got_resp);
+                    end
+                end
+                if ((tb_top.u_ft600q.ctrl_wr_ptr - tb_top.u_ft600q.ctrl_rd_ptr) != 0) begin
+                    n_fail++;
+                    $display("[FAULT-MID-CMD] FAIL %s%0d: %0d unexpected extra ctrl word(s)", (shape == 0) ? "A" : "B", k, tb_top.u_ft600q.ctrl_wr_ptr - tb_top.u_ft600q.ctrl_rd_ptr);
+                    while ((tb_top.u_ft600q.ctrl_wr_ptr - tb_top.u_ft600q.ctrl_rd_ptr) >= 4)
+                        tb_top.u_ft600q.wait_response_frame_typed(m, f, a, d);
+                end
+            end
+            // TOKEN_HI must still be at its reset value (a swallowed read that
+            // decoded as a write would have changed it).
+            tb_top.u_ft600q.send_command_frame(CMD_MAGIC, flags_rd(), REG_TOKEN_HI, 16'h0000);
+            tb_top.u_ft600q.wait_response_frame_typed(m, f, a, d);
+            if (d !== 16'hCEFA) begin n_fail++; $display("[FAULT-MID-CMD] FAIL %s%0d: TOKEN_HI = 0x%04h after the episode (expected 0xCEFA untouched)", (shape == 0) ? "A" : "B", k, d); end
+            else n_pass++;
+            tb_top.u_ft600q.keep_newest_telemetry_frames(2, dropped);
+        end
+    end
+
+    if (tb_top.u_ft600q.puncture_count != 0) begin
+        n_fail += tb_top.u_ft600q.puncture_count;
+        $display("[FAULT-MID-CMD] FAIL %0d telemetry frame(s) punctured", tb_top.u_ft600q.puncture_count);
+    end
+
+    $display("");
+    if (n_fail == 0) $display("[FAULT-MID-CMD] PASS — %0d checks: a fault frame never costs a command, whether the command arrives during the fault frame or is half-received when the fault fires", n_pass);
+    else             $display("[FAULT-MID-CMD] FAIL — %0d check(s) failed (%0d passed)", n_fail, n_pass);
+    $display("RESULTS: %0d passed, %0d failed", n_pass, n_fail);
+    $display("STATUS: %0s", (n_fail == 0) ? "PASS" : "FAIL");
+endtask
+`endif  // RUN_FAULT_MID_CMD
+
 `ifdef RUN_USB_STALL_CMDS
 // ---------------------------------------------------------------------------
 // SA-USBSTALL-CMDS — the host stops reading (the FT600 fills, TXE_N high) and,
