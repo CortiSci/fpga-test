@@ -39,7 +39,7 @@ not re-introduce a copy of the module list here.
 ## Running a bench against another branch
 
 ```python
-run_simulation("consolidator_board_unique", rtl_ref="72606e4")
+run_simulation("consolidator_board_identity", rtl_ref="72606e4")
 ```
 
 The RTL is materialised from that ref; the benches always come from this
@@ -125,6 +125,6 @@ often here:
 ## Status
 
 The suite is not currently green: both consolidator revisions fail
-`consolidator_board_unique`, and geoff's own release receipt records
+`consolidator_board_identity`, and geoff's own release receipt records
 `single_leg`, `board_unique`, `board_unique_skew` and `tail_reset` as blocking.
 Establish a green baseline before treating a failure here as a regression.
