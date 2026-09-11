@@ -419,6 +419,8 @@ module tb_top;
         run_STREAM_DIES();       // tails go silent with RUN set: host still answered (tests/test_host_xact.sv)
 `elsif RUN_LEG_PAUSE
         run_LEG_PAUSE();         // one leg pauses ~1 ms: re-admission at plane offset 0 (tests/test_host_xact.sv)
+`elsif RUN_IMP_CYCLE
+        run_IMP_CYCLE();         // the impedance sweep's per-pixel command cycle (tests/test_host_xact.sv)
 `else
         run_SA_HOST_XACT();
 `endif

@@ -426,6 +426,9 @@ endtask
 `ifdef RUN_LEG_PAUSE
 `define HX_NEED_CFG_WRITE2
 `endif
+`ifdef RUN_IMP_CYCLE
+`define HX_NEED_CFG_WRITE2
+`endif
 `ifdef HX_NEED_CFG_WRITE2
 // A WRITE-mode cfg transaction (rw=1): the only kind a streaming leg accepts
 // (reads and passthroughs to a running leg are rejected — fault bit 4).
@@ -982,6 +985,178 @@ task automatic run_SA_USB_STALL_CMDS();
     $display("STATUS: %0s", (n_fail == 0) ? "PASS" : "FAIL");
 endtask
 `endif  // RUN_USB_STALL_CMDS
+
+`ifdef RUN_IMP_CYCLE
+// ---------------------------------------------------------------------------
+// SA-IMP-CYCLE — the sequential impedance sweep's per-pixel command cycle, as
+// the bring-up tool issues it (CannedFunctions::asicImpedanceSweepSequential,
+// 2026-09-10 19:24): with two legs streaming, the host's capture reader stops
+// (the FT600 fills for ~1.5 ms), then, reading again, the tool sends
+//   RUN=0 (CH_CTRL leg 0)  ->  CS2_PASS  ->  3-byte Pixel write  ->  TELEM_EN
+//   ->  SPI_EN_MASK  ->  RUN=1
+// waiting for each response.  After 97 pixels the FT_WritePipe of the next
+// command timed out (status 19) with the previous command answered 1 ms
+// earlier.  This bench pins the FPGA's side of that cycle, N_CYCLE times:
+//   1. every command is answered within RESP_NS (the decoder never wedges after
+//      RUN=0 lands mid-frame with the FT600 full);
+//   2. the FPGA keeps draining RXF between responses (no unread command words);
+//   3. after RUN=1 the stream is right-or-flagged and strict-correct again
+//      within RECOVER_FRAMES;
+//   4. no write into a full FT600, no punctured frame.
+// If it passes, the wedge is on the FT600 / driver / host side of the OUT pipe.
+// ---------------------------------------------------------------------------
+task automatic cfg_write3(input logic [1:0] c, input logic [7:0] b0, input logic [7:0] b1, input logic [7:0] b2);
+    logic [15:0] mm, ff, aa, dd;
+    tb_top.u_ft600q.send_command_frame(CMD_MAGIC, flags_wr(), 16'h0030, {b0, b1});
+    tb_top.u_ft600q.wait_response_frame_typed(mm, ff, aa, dd);
+    tb_top.u_ft600q.send_command_frame(CMD_MAGIC, flags_wr(), 16'h0032, {b2, 8'h00});
+    tb_top.u_ft600q.wait_response_frame_typed(mm, ff, aa, dd);
+    tb_top.u_ft600q.send_command_frame(CMD_MAGIC, flags_wr(), 16'h0031, spi_cfg_ctrl_word(c, 1'b1, 1'b1, 3'd3));
+    tb_top.u_ft600q.wait_response_frame_typed(mm, ff, aa, dd);
+    #100_000;
+endtask
+
+// One register command with a bounded wait for its response.  Icarus has no
+// `ref` task ports, so the verdicts accumulate in these two and are folded into
+// the task's counters at the end.
+int ic_npass = 0, ic_nfail = 0;
+task automatic ic_cmd(input logic [15:0] flags, input logic [15:0] addr, input logic [15:0] data,
+                      input string what);
+    logic [15:0] m, f, a, d;
+    time t0;
+    t0 = $time;
+    tb_top.u_ft600q.send_command_frame(CMD_MAGIC, flags, addr, data);
+    tb_top.u_ft600q.wait_response_frame_typed(m, f, a, d);
+    if (($time - t0) > 64'd3_000_000) begin
+        ic_nfail++;
+        $display("[SA-IMP-CYCLE] FAIL %s: response took %0d us (tool times out at 1.5 s; the decoder is holding it)", what, ($time - t0) / 1000);
+    end else if (m !== 16'h55AA || a !== addr) begin
+        ic_nfail++;
+        $display("[SA-IMP-CYCLE] FAIL %s: response {%04h %04h %04h %04h}", what, m, f, a, d);
+    end else ic_npass++;
+endtask
+
+task automatic run_IMP_CYCLE();
+    localparam int N_CYCLE        = 3;
+    localparam int GAP_NS         = 1_500_000;   // the reader stopped: ~1.5 ms before RUN=0 lands
+    localparam int RECOVER_FRAMES = 8;
+    localparam int SETTLE_FRAMES  = 8;
+    localparam int DWELL_FRAMES   = 4;           // the tool's dwell is 50 ms; 4 frames here
+    logic [15:0] m, f, a, d;
+`ifdef ICARUS
+    logic [47:0] tx, rx;
+`else
+    logic [7:0]  tx[0:5], rx[0:5];
+`endif
+    logic [15:0] hdr;
+    int          n_fail = 0, n_pass = 0, n_flush, dropped, queued;
+    int          frame_no = 0, k, ch, i, all_clean, window_clean, pending;
+
+    $display("");
+    $display("[SA-IMP-CYCLE] the impedance sweep's per-pixel cycle x%0d: reader gap, RUN=0 mid-frame, CS2_PASS, Pixel write, TELEM_EN, mask, RUN=1", N_CYCLE);
+
+    tb_top.tail_ch[0].asic_model.data_mode = MODE_UNIQUE;
+    tb_top.tail_ch[3].asic_model.data_mode = MODE_UNIQUE;
+    hx_armed_mask = 4'h9;
+
+    tb_top.u_ft600q.send_command_frame(CMD_MAGIC, flags_wr(), REG_SPI_EN_MASK, 16'h0009);
+    tb_top.u_ft600q.wait_response_frame_typed(m, f, a, d);
+    tb_top.u_ft600q.send_command_frame(CMD_MAGIC, flags_wr(), REG_SPI_CLK_DIV, 16'h001F);
+    tb_top.u_ft600q.wait_response_frame_typed(m, f, a, d);
+    #200;
+    for (ch = 0; ch < 4; ch += 3) begin
+`ifdef ICARUS
+        tx = 48'h01_11_00_00_00_00; spi_cfg_xact(ch[1:0], tx, 3'd2, rx);
+        tx = 48'h02_01_00_00_00_00; spi_cfg_xact(ch[1:0], tx, 3'd2, rx);
+`else
+        tx = '{8'h01, 8'h11, 8'h00, 8'h00, 8'h00, 8'h00}; spi_cfg_xact(ch[1:0], tx, 3'd2, rx);
+        tx = '{8'h02, 8'h01, 8'h00, 8'h00, 8'h00, 8'h00}; spi_cfg_xact(ch[1:0], tx, 3'd2, rx);
+`endif
+    end
+    tb_top.u_ft600q.send_command_frame(CMD_MAGIC, flags_wr(), 16'h0140, 16'h0009);   // ACQ_ALL_RUN legs 0,3
+    tb_top.u_ft600q.wait_response_frame_typed(m, f, a, d);
+`ifdef ICARUS
+    tb_top.u_ft600q.flush_tx_capture(n_flush);
+`else
+    begin logic [15:0] fw [0:4095]; tb_top.u_ft600q.flush_tx_capture(fw, n_flush); end
+`endif
+    tb_top.u_ft600q.enable_frame_trace(1'b1);
+
+    hx_grab_frame(hdr);
+    window_clean = 0;
+    for (i = 0; i < SETTLE_FRAMES; i++) begin
+        hx_grab_frame(hdr); frame_no++;
+        hx_judge_frame(frame_no, n_pass, n_fail, all_clean);
+        if (all_clean) begin window_clean = 1; break; end
+    end
+    if (window_clean) begin n_pass++; $display("[SA-IMP-CYCLE] start-up: all-clean frame within %0d frame(s)", i + 1); end
+    else begin n_fail++; $display("[SA-IMP-CYCLE] FAIL start-up: no all-clean frame within %0d frames", SETTLE_FRAMES); end
+
+    for (k = 0; k < N_CYCLE; k++) begin
+        // the dwell: the tool reads frames for 50 ms
+        for (i = 0; i < DWELL_FRAMES; i++) begin
+            hx_grab_frame(hdr); frame_no++;
+            hx_judge_frame(frame_no, n_pass, n_fail, all_clean);
+        end
+        // "Capture: stopped" — the reader is gone until the RUN=0 do_cmd reads again
+        $display("[SA-IMP-CYCLE] cycle %0d: reader stops  t=%0t", k, $time);
+        tb_top.u_ft600q.set_txe_backpressure(1'b1);
+        #GAP_NS;
+        tb_top.u_ft600q.set_txe_backpressure(1'b0);
+        $display("[SA-IMP-CYCLE] cycle %0d: RUN=0 leg 0 (mid-frame, FT600 was full)  t=%0t", k, $time);
+        ic_cmd(flags_wr(), 16'h0100, 16'h0000, "RUN=0");
+        // the tool's asicPassthroughWrite: CS2_PASS then the 3-byte pixel word,
+        // then TELEM_EN, mask, RUN — each a register write pair answered in turn
+        cfg_write2(2'd0, 8'h04, 8'h00);                 // CS2_PASS
+        cfg_write3(2'd0, 8'hC5, 8'h11, 8'h01);          // Pixel {C5 11 01}
+        cfg_write2(2'd0, 8'h02, 8'h01);                 // TELEM_EN normal
+        ic_cmd(flags_wr(), REG_SPI_EN_MASK, 16'h0009, "SPI_EN_MASK");
+        ic_cmd(flags_wr(), 16'h0100, 16'h0001, "RUN=1");
+        // 2. nothing left unread in the FT600's OUT FIFO
+        #200_000;
+        queued = tb_top.u_ft600q.rx_count();
+        if (queued != 0) begin n_fail++; $display("[SA-IMP-CYCLE] FAIL cycle %0d: %0d command word(s) unread in the FT600 200 us after the last command", k, queued); end
+        else n_pass++;
+        // 3. the stream comes back right-or-flagged and strict-correct
+        pending = tb_top.u_ft600q.telem_frames_pending();
+        tb_top.u_ft600q.keep_newest_telemetry_frames(2, dropped);
+        window_clean = 0;
+        for (i = 0; i < RECOVER_FRAMES && !window_clean; i++) begin
+            hx_grab_frame(hdr); frame_no++;
+            $display("[SA-IMP-CYCLE] frame[%0d] (cycle %0d, +%0d) cnt_lo=%0d phase={%04h %04h %04h %04h}",
+                     frame_no, k, i, tb_top.u_ft600q.v3_count_lo, hx_phase[0], hx_phase[1], hx_phase[2], hx_phase[3]);
+            hx_judge_frame(frame_no, n_pass, n_fail, all_clean);
+            if (all_clean) window_clean = 1;
+        end
+        if (window_clean) begin n_pass++; $display("[SA-IMP-CYCLE] cycle %0d: strict-correct again within %0d frame(s) of RUN=1", k, i); end
+        else begin n_fail++; $display("[SA-IMP-CYCLE] FAIL cycle %0d: no all-correct frame within %0d frames of RUN=1", k, RECOVER_FRAMES); end
+        if ((tb_top.u_ft600q.ctrl_wr_ptr - tb_top.u_ft600q.ctrl_rd_ptr) != 0) begin
+            n_fail++;
+            $display("[SA-IMP-CYCLE] FAIL cycle %0d: %0d unexpected ctrl word(s)", k, tb_top.u_ft600q.ctrl_wr_ptr - tb_top.u_ft600q.ctrl_rd_ptr);
+            while ((tb_top.u_ft600q.ctrl_wr_ptr - tb_top.u_ft600q.ctrl_rd_ptr) >= 4)
+                tb_top.u_ft600q.wait_response_frame_typed(m, f, a, d);
+        end
+    end
+
+    n_pass += ic_npass; n_fail += ic_nfail;
+    if (tb_top.u_ft600q.overflow_drop_count != 0) begin
+        n_fail++;
+        $display("[SA-IMP-CYCLE] FAIL %0d word(s) written while TXE_N was high (dropped by the FT600)", tb_top.u_ft600q.overflow_drop_count);
+    end else n_pass++;
+    if (tb_top.u_ft600q.puncture_count != 0) begin
+        n_fail += tb_top.u_ft600q.puncture_count;
+        $display("[SA-IMP-CYCLE] FAIL %0d telemetry frame(s) punctured", tb_top.u_ft600q.puncture_count);
+    end
+
+    $display("");
+    if (n_fail == 0)
+        $display("[SA-IMP-CYCLE] PASS — %0d checks: %0d sweep cycles, every command answered, FT600 OUT drained, stream re-aligned", n_pass, N_CYCLE);
+    else
+        $display("[SA-IMP-CYCLE] FAIL — %0d check(s) failed (%0d passed)", n_fail, n_pass);
+    $display("RESULTS: %0d passed, %0d failed", n_pass, n_fail);
+    $display("STATUS: %0s", (n_fail == 0) ? "PASS" : "FAIL");
+endtask
+`endif  // RUN_IMP_CYCLE
 
 `ifdef RUN_USB_STALL
 // ============================================================================
