@@ -31,6 +31,14 @@ Legs
   normal    TELEM_EN=0x01.  Each side must deliver the -f file.
   imp_even  TELEM_EN=0x02.  Each side must deliver the -if file on the even SD
   imp_odd   TELEM_EN=0x03.  lanes / odd lanes, in the tail's impedance packing
+  inject    The bring-up tool's impedance SWEEP on a few pixels (2026-09-11):
+            normal-mode streaming, one pixel at a time given EN_IM through the
+            tail's CS passthrough (Global PSLICE select + the 64-row Pixel shift
+            chain), the +/-65 nA square wave recovered per pixel exactly as
+            CannedFunctions::measureCurrent does (phase bins by frame_cnt & 3,
+            peak-to-peak of the bin means).  Both emulators share the ASIC pixel
+            model (asic_pixel_model.h), so pixel position AND swing must agree,
+            and match the model's deterministic Z = 1000 + 100*(row*16+lane) + 25*asic.
             (impedance_mode_spec.md: one word per pair of 5.12 MHz ticks,
             output[2k] = lane[k]@T0, output[2k+1] = lane[k]@T1; 512 words per
             sweep, two sweeps per 1024-word consolidator frame).
@@ -100,6 +108,15 @@ REG_SPI_CLK_DIV = 0x0060
 REG_ACQ_ALL_RUN = 0x0140
 SPI_GO, SPI_RW, N_BYTES_SHIFT = 0x0008, 0x0004, 5
 TAIL_PING, TAIL_CTRL, TAIL_TELEM_EN = 0xAA, 0x01, 0x02
+TAIL_CS1_PASS, TAIL_CS2_PASS = 0x03, 0x04      # next transaction -> ASIC Global (SS0) / Pixel chain (SS1)
+PIX_OFF, PIX_INJECT = [0xC5, 0x11, 0x01], [0xC5, 0x11, 0x07]   # the sweep's Pixel words (CannedFunctions.cpp)
+# The emulators' shared impedance model (Software Emulator/emulator/src/asic_pixel_model.h)
+MODEL_UV_PER_COUNT, MODEL_INJECT_A = 12.07, 65e-9
+def model_z_ohms(asic: int, row: int, lane: int) -> float:
+    return 1000.0 + 100.0 * (row * 16 + lane) + 25.0 * asic
+def model_swing_counts(asic: int, row: int, lane: int) -> int:
+    return 2 * round(MODEL_INJECT_A * model_z_ohms(asic, row, lane) / (MODEL_UV_PER_COUNT * 1e-6))
+INJECT_LANE, INJECT_ROWS, INJECT_FRAMES = 5, [0, 1, 3], 16
 CTRL_RUN = 0x11            # RO_RSTn=1 + MCLK_EN=1
 N_SENSORS = 4096
 
@@ -326,6 +343,17 @@ class Host:
             self.p.write_reg(REG_ACQ_ALL_RUN, 0x0000, self.t, self.stray)
         except Exception:
             pass
+
+    # ---- the impedance sweep's ASIC writes (CannedFunctions::asicPassthroughWrite) ----
+    def asic_write(self, ch: int, cs_pass_op: int, word: list[int]) -> None:
+        self.spi_xact(ch, 2, [cs_pass_op, 0], True)      # arm the passthrough (read mode keeps the trailing clocks)
+        self.spi_xact(ch, 3, word, False)                # the 24-bit word, write mode -> exactly 24 SCLKs
+
+    def drain(self, quiet_s: float) -> int:
+        n = 0
+        while self.p.next_frame(quiet_s) is not None:
+            n += 1
+        return n
 
 
 # =============================================================================
@@ -609,9 +637,135 @@ def make_pattern_files(dat: Path, imp: Path) -> None:
 
 
 # =============================================================================
+# The impedance sweep on a few pixels (leg "inject")
+# =============================================================================
+def measure_pixel(frames: list[Frame], ch: int, lane: int) -> tuple[int, int, int] | None:
+    """CannedFunctions::measureCurrent on captured frames: lane `lane` of leg `ch`,
+    every true sweep group, binned by frame_cnt & 3; the group with the most
+    samples (only one pixel is enabled) gives (group, swing_counts, n_samples),
+    swing = max(bin mean) - min(bin mean).  None when no group has all four bins."""
+    sums: dict[int, list[float]] = {}
+    cnts: dict[int, list[int]] = {}
+    for f in frames:
+        pw = f.phases[ch]
+        if (pw & 0x5000) or (pw & 0x03FF) > 63:
+            continue                                  # UNDF/PAR or no usable phase: not at its phase
+        ph = f.frame_cnt & 3
+        lw = leg_words(f.words, ch, pw)               # already de-rotated to true sweep groups
+        for g in range(64):
+            planes = lw[16 * g:16 * g + 16]
+            v = 0
+            for k in range(16):
+                v |= ((planes[k] >> lane) & 1) << (15 - k)
+            if v == 0x8000 or v == 0xACED:
+                continue
+            sv = v - 0x10000 if v & 0x8000 else v
+            sums.setdefault(g, [0.0] * 4)[ph] += sv
+            cnts.setdefault(g, [0] * 4)[ph] += 1
+    best, bestn = -1, 0
+    for g, c in cnts.items():
+        if sum(c) > bestn:
+            best, bestn = g, sum(c)
+    if best < 0 or bestn < 8 or any(c == 0 for c in cnts[best]):
+        return None
+    means = [sums[best][i] / cnts[best][i] for i in range(4)]
+    return best, int(round(max(means) - min(means))), bestn
+
+
+def run_inject(name: str, exe: Path, args: list[str], first_frame_timeout: float, frame_timeout: float,
+               cmd_timeout: float, log) -> tuple[RunResult, dict[tuple[int, int], tuple[int, int, int] | None]]:
+    """Bring the emulator up in normal mode, then walk INJECT_ROWS on lane
+    INJECT_LANE of every leg exactly as the tool's sequential sweep does: RUN=0,
+    Global PSLICE=lane, 64 x PIX_OFF to clear the chain, PIX_INJECT, then one
+    PIX_OFF per row advance; RUN=1, capture INJECT_FRAMES frames, RUN=0 + drain.
+    Returns the per-(leg,row) measurement."""
+    res = RunResult(name, str(exe), 1, [], [], 0, False)
+    meas: dict[tuple[int, int], tuple[int, int, int] | None] = {}
+    if not exe.exists():
+        res.error = f"missing {exe}"
+        return res, meas
+    t0 = time.time()
+    kw = {}
+    if os.name == "nt":
+        kw["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW
+    proc = subprocess.Popen([str(exe), *args], cwd=str(exe.parent),
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **kw)
+    pipe = PipeClient()
+    try:
+        if not pipe.wait_for_pipe(30):
+            res.error = "emulator never created its transport endpoints"
+            return res, meas
+        pipe.connect()
+        res.launch_ok = True
+        host = Host(pipe, cmd_timeout, log)
+        info = host.bringup_and_run(1)
+        res.ping = info["ping"]
+        # A first frame proves the stream is up, then stop it for the pixel writes.
+        first = pipe.next_frame(first_frame_timeout)
+        host.stop()
+        host.drain(frame_timeout if first is None else 1.0)
+        if first is None:
+            res.error = "no telemetry frame after bring-up"
+            return res, meas
+        prev_row = None
+        for row in INJECT_ROWS:
+            for ch in range(4):
+                if prev_row is None:
+                    host.asic_write(ch, TAIL_CS1_PASS, [0xA0, 0x4E, INJECT_LANE & 0x0F])   # Global: PSLICE = lane
+                    for _ in range(64):
+                        host.asic_write(ch, TAIL_CS2_PASS, PIX_OFF)                       # clear the chain
+                    host.asic_write(ch, TAIL_CS2_PASS, PIX_INJECT)                        # the injecting word
+                    for _ in range(row):
+                        host.asic_write(ch, TAIL_CS2_PASS, PIX_OFF)
+                else:
+                    for _ in range(row - prev_row):
+                        host.asic_write(ch, TAIL_CS2_PASS, PIX_OFF)                       # advance one row
+            prev_row = row
+            host.stray.clear()
+            pipe.write_reg(REG_ACQ_ALL_RUN, 0x000F, cmd_timeout, host.stray)
+            payloads: list[bytes] = list(host.stray)
+            tmo = first_frame_timeout
+            while len(payloads) < INJECT_FRAMES:
+                m = pipe.next_frame(tmo)
+                if m is None:
+                    break
+                payloads.append(m)
+                tmo = frame_timeout
+            host.stop()
+            host.drain(1.0)
+            frames = [Frame.parse(p) for p in payloads]
+            res.frames.extend(frames)
+            for ch in range(4):
+                meas[(ch, row)] = measure_pixel(frames, ch, INJECT_LANE)
+            log(f"  [{name}] row {row}: {len(frames)} frames; " + "  ".join(
+                f"leg{ch + 5}=" + (f"g{m[0]} swing {m[1]} ({m[2]} smp)" if (m := meas[(ch, row)]) else "none")
+                for ch in range(4)))
+        res.n_short = pipe.n_short
+    except Exception as e:      # noqa: BLE001 — report, do not crash the other leg
+        res.error = f"{type(e).__name__}: {e}"
+    finally:
+        pipe.close()
+        try:
+            proc.kill()
+            proc.wait(timeout=10)
+        except Exception:
+            pass
+        res.seconds = time.time() - t0
+    return res, meas
+
+
+def make_dc_file(dat: Path) -> None:
+    """A -f file whose frames are all identical (value = sensor index), so the
+    per-pixel peak-to-peak isolates the injection."""
+    with dat.open("wb") as f:
+        for _ in range(N_FILE_FRAMES):
+            f.write(struct.pack(f"<{N_SENSORS}h", *[i & 0x0FFF for i in range(N_SENSORS)]))
+
+
+# =============================================================================
 # main
 # =============================================================================
-LEGS = {"normal": 1, "imp_even": 2, "imp_odd": 3}
+LEGS = {"normal": 1, "imp_even": 2, "imp_odd": 3, "inject": 1}
 
 
 def main() -> int:
@@ -634,7 +788,9 @@ def main() -> int:
     rel = Path(a.release_dir)
     sw_exe, rtl_exe = rel / f"ionm_emulator{EXE}", rel / f"ionm_emu_rtl{EXE}"
     dat, imp = rel / "diff_emulators_pattern.dat", rel / "diff_emulators_imp.dat"
+    dc = rel / "diff_emulators_dc.dat"
     make_pattern_files(dat, imp)
+    make_dc_file(dc)
     cell = load_elec_map(ELEC_MAP_H)
     known = {} if a.strict else json.loads((HERE / "known_divergences.json").read_text(encoding="utf-8")).get("divergences", {})
 
@@ -751,15 +907,59 @@ def main() -> int:
         report["legs"][leg]["semantic"] = {"matched_frames": len(common), "compared": n_cmp,
                                            "diff_sensors": n_diff, "shape": shape}
 
+    def run_inject_pair(leg: str) -> None:
+        log(f"=== leg {leg}: the impedance sweep on lane {INJECT_LANE}, chain rows {INJECT_ROWS}, all four legs (-f = DC file) ===")
+        emu_args = ["-f", str(dc), "-loop"]
+        sides: dict[str, tuple[RunResult, dict]] = {}
+        if not a.rtl_only:
+            sides["sw"] = run_inject("sw", sw_exe, emu_args, 30.0, 15.0, a.cmd_timeout, log)
+            log(f"  [sw ] {len(sides['sw'][0].frames)} frames in {sides['sw'][0].seconds:.1f}s  {sides['sw'][0].error}")
+        if not a.sw_only:
+            sides["rtl"] = run_inject("rtl", rtl_exe, emu_args, a.first_frame_timeout, a.frame_timeout, a.cmd_timeout, log)
+            log(f"  [rtl] {len(sides['rtl'][0].frames)} frames in {sides['rtl'][0].seconds:.1f}s  {sides['rtl'][0].error}")
+        legrep = {"mode": 1, "sides": {}}
+        for k, (r, m) in sides.items():
+            legrep["sides"][k] = {"frames": len(r.frames), "ping": r.ping, "error": r.error, "seconds": round(r.seconds, 1),
+                                  "measurements": {f"leg{ch + 5}/row{row}": v for (ch, row), v in m.items()},
+                                  "frames_per_s": round(len(r.frames) / r.seconds, 2) if r.seconds > 0 else None}
+        report["legs"][leg] = legrep
+        if len(sides) < 2:
+            return
+        (sw, swm), (rtl, rtlm) = sides["sw"], sides["rtl"]
+
+        def add(name: str, ok: bool, detail: str) -> None:
+            key = f"{leg}/{name}"
+            kn = known.get(key, "")
+            checks.append(Check(leg, name, ok, detail, kn if not ok else ""))
+            mark = "PASS" if ok else ("KNOWN" if kn else "FAIL")
+            log(f"  {mark:5s} {key}: {detail}" + (f"  [known: {kn}]" if (kn and not ok) else ""))
+
+        add("both_launch", sw.launch_ok and rtl.launch_ok and not sw.error and not rtl.error,
+            f"sw={sw.launch_ok} rtl={rtl.launch_ok} {sw.error} {rtl.error}")
+        for row in INJECT_ROWS:
+            chain_row = 63 - row                    # the injecting word's position in the 64-row chain
+            for ch in range(4):
+                s_m, r_m = swm.get((ch, row)), rtlm.get((ch, row))
+                want = model_swing_counts(ch, chain_row, INJECT_LANE)
+                ok = (s_m is not None and r_m is not None and s_m[0] == r_m[0] == chain_row
+                      and abs(s_m[1] - r_m[1]) <= 1 and abs(s_m[1] - want) <= 1)
+                add(f"pixel/leg{ch + 5}_row{row}", ok,
+                    f"sw={'g%d swing %d' % s_m[:2] if s_m else 'none'} rtl={'g%d swing %d' % r_m[:2] if r_m else 'none'}"
+                    f" expected g{chain_row} swing {want} (Z={model_z_ohms(ch, chain_row, INJECT_LANE):.0f} ohm)")
+
     for leg in [s.strip() for s in a.legs.split(",") if s.strip()]:
         if leg not in LEGS:
             log(f"unknown leg {leg}")
             return 2
-        run_pair(leg, LEGS[leg])
+        if leg == "inject":
+            run_inject_pair(leg)
+        else:
+            run_pair(leg, LEGS[leg])
 
     if not a.keep_dat:
         dat.unlink(missing_ok=True)
         imp.unlink(missing_ok=True)
+        dc.unlink(missing_ok=True)
 
     n_pass = sum(1 for c in checks if c.ok)
     n_known = sum(1 for c in checks if not c.ok and c.known)

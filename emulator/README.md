@@ -41,7 +41,7 @@ Both binaries must be current builds in `Software Emulator/build/test_app/Releas
 (`cmake --build build --config Release` for the SW side).  The whole run is
 about a minute; the RTL emulator produces 6 frames in ~1 s in normal mode.
 
-Flags: `--legs normal,imp_even,imp_odd` (default all three), `--frames N`, `--strict` (ignore the known list),
+Flags: `--legs normal,imp_even,imp_odd,inject` (default all four), `--frames N`, `--strict` (ignore the known list),
 `--sw-only` / `--rtl-only` for smoke-testing one side, `--out report.json`.
 
 The last lines are the same sentinels the SV benches emit
@@ -53,7 +53,7 @@ Also in the JSON report as `throughput` and per side `frames_per_s`.
 
 **On GitHub:** `.github/workflows/emulator.yml` builds both emulators on Ubuntu
 (g++/cmake, apt verilator) and runs this test `--strict`; the check summary shows
-the 42-check table and the throughput line.  Locally on Windows it is also the
+the 55-check table (42 + the 13 `inject` checks) and the throughput line.  Locally on Windows it is also the
 suite host target `emulator_differential`.
 
 ## What is compared — three layers
@@ -78,6 +78,26 @@ impedance legs each side must deliver the **`-if` file** on the selected lanes,
 unpacked with the spec's T0/T1 rule (`decode_impedance()`), exactly as the normal
 leg must deliver `-f`.  A side showing the wrong file is reported as such
 ("different FILES: …") rather than as a value mismatch.
+
+### The impedance sweep itself (leg `inject`, 2026-09-11)
+
+The bring-up tool's impedance measurement is not the tail's impedance mode: it is
+normal-mode streaming with **one pixel at a time given `EN_IM`** through the
+tail's CS passthrough — a Global write selecting the pixel slice (lane), 64
+`PIX_OFF` words to clear the 64-row Pixel shift chain, one `PIX_INJECT` word, then
+one `PIX_OFF` per row advance — and the ±65 nA square wave at Fs/4 recovered from
+the stream as the peak-to-peak of the four `frame_cnt & 3` bin means
+(`CannedFunctions::measureCurrent`).  Leg `inject` runs exactly that on lane 5,
+chain rows 0/1/3, all four legs, against both emulators, with a `-f` file whose
+frames are identical so the peak-to-peak isolates the injection.  Both emulators
+share the ASIC pixel model (`Software Emulator/emulator/src/asic_pixel_model.h`:
+PSLICE select, per-slice chains committed at the frame boundary, EN_PIXEL → 0x8000,
+EN_IM → ±A with A = 65 nA × Z / 12.07 µV per count and the deterministic
+Z = 1000 + 100·(row·16 + lane) + 25·asic Ω), so per pixel the **group** (63 − row)
+and the **swing** (2A, e.g. 1102 counts for row 0 lane 5) must agree between the
+sides and with the model; 13 checks.  The RTL side reaches the model through the
+tails' real `spi_passthrough.v` and a 24-bit SPI decoder on the exported
+`SPI_RO_*` pins; the SW side through `TailFpga`'s CS1/CS2 arming into `AsicBfm`.
 
 ## Known divergences
 
