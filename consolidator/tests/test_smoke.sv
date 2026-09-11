@@ -73,3 +73,22 @@ task automatic run_SM05();
     else
         $display("[SM-05] FAIL (USB_RX_WORDS %0d -> %0d, USB_STS = 0x%04h)", d1, d2, sts);
 endtask
+
+// SM-06 — build identity (2026-09-10): BUILD_ID_HI/LO (0x0007/0x0008) and
+// BUILD_INFO (0x0009) read back exactly what the design's build_id module
+// reports.  In simulation that is the committed placeholder (hash 0, clean);
+// on hardware the bitstream build substitutes the real git short hash, and the
+// host stamps it into its logs and recordings.
+task automatic run_SM06();
+    logic [15:0] m, f, a, hi, lo, info;
+    tb_top.u_ft600q.send_command_frame(CMD_MAGIC, flags_rd(), 16'h0007, 16'h0000);
+    tb_top.u_ft600q.wait_response_frame_typed(m, f, a, hi);
+    tb_top.u_ft600q.send_command_frame(CMD_MAGIC, flags_rd(), 16'h0008, 16'h0000);
+    tb_top.u_ft600q.wait_response_frame_typed(m, f, a, lo);
+    tb_top.u_ft600q.send_command_frame(CMD_MAGIC, flags_rd(), 16'h0009, 16'h0000);
+    tb_top.u_ft600q.wait_response_frame_typed(m, f, a, info);
+    if ({hi, lo} == tb_top.dut_con.u_build_id.hash && info == {15'h0, tb_top.dut_con.u_build_id.dirty})
+        $display("[SM-06] PASS (BUILD_ID = 0x%08h, BUILD_INFO = 0x%04h — matches build_id.v)", {hi, lo}, info);
+    else
+        $display("[SM-06] FAIL (BUILD_ID read 0x%08h expected 0x%08h, BUILD_INFO 0x%04h)", {hi, lo}, tb_top.dut_con.u_build_id.hash, info);
+endtask
