@@ -1300,6 +1300,22 @@ task automatic run_SA_USB_STALL();
         $display("[SA-USBSTALL] FAIL %0d telemetry frame(s) punctured", tb_top.u_ft600q.puncture_count);
     end
 
+    // ── USB_TXE_STALL (0x005D) must have counted the gaps (2026-09-10 night) ──
+    // Three 2 ms host read gaps with the stream running = ~6 ms of TXE_N high
+    // with the TX CDC backed up = a dozen or so 400 us ticks; require at least 5.
+    begin
+        logic [15:0] m, f, a, d;
+        tb_top.u_ft600q.send_command_frame(CMD_MAGIC, 16'h0000, 16'h005D, 16'h0000);
+        tb_top.u_ft600q.wait_response_frame_typed(m, f, a, d);
+        if (m === 16'h55AA && a === 16'h005D && d >= 16'd5) begin
+            n_pass++;
+            $display("[SA-USBSTALL] USB_TXE_STALL = %0d x 400 us of FT600 back-pressure recorded across %0d gaps", d, N_STALL);
+        end else begin
+            n_fail++;
+            $display("[SA-USBSTALL] FAIL USB_TXE_STALL reads {%04h %04h %04h %04h} after %0d x 2 ms host read gaps (expected >= 5 ticks)", m, f, a, d, N_STALL);
+        end
+    end
+
     $display("");
     if (n_fail == 0)
         $display("[SA-USBSTALL] PASS — %0d checks: every leg-frame right or flagged, re-aligned after each of %0d host read gaps", n_pass, N_STALL);
