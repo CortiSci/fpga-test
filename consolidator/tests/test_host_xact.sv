@@ -306,6 +306,140 @@ task automatic run_SA_HOST_XACT();
     $display("STATUS: %0s", (n_fail == 0) ? "PASS" : "FAIL");
 endtask
 
+`ifdef RUN_LEG_PAUSE
+// ---------------------------------------------------------------------------
+// LEG-PAUSE — one streaming leg stops delivering for ~1 ms while the other
+// keeps going, then resumes.  2026-09-10 16:28 recording (legs 5+8, raw): LEG5
+// went silent, the engine waited two frame ticks, the dead-leg escape released
+// and un-aligned LEG5 (LEG8 overflowed and re-anchored meanwhile); LEG5's
+// receiver had never lost its anchor, so when its words resumed the engine
+// re-admitted it at a 16-slot boundary with the FIFO head at an arbitrary word:
+// 151 and 313 frames of UNFLAGGED data at plane offsets 12 and 3, until an
+// unrelated re-anchor.  Contract: every leg-frame strictly correct (plane
+// offset 0, sample offset == phase word) OR flagged; both legs strict-correct
+// again within RECOVER_FRAMES of the resume.
+// ---------------------------------------------------------------------------
+task automatic run_LEG_PAUSE();
+    localparam int N_PAUSE        = 3;
+    localparam int RECOVER_FRAMES = 10;
+    localparam int SETTLE_FRAMES  = 8;
+    localparam int JUDGE_AFTER    = 12;      // frames judged after each resume
+    int pause_ns [0:2];
+    logic [15:0] m, f, a, d;
+`ifdef ICARUS
+    logic [47:0] tx, rx;
+`else
+    logic [7:0]  tx[0:5], rx[0:5];
+`endif
+    logic [15:0] hdr;
+    int          n_fail = 0, n_pass = 0, n_flush, ch, i, k, all_clean, window_clean, frame_no = 0, dropped, pending;
+
+    pause_ns[0] = 1_200_000; pause_ns[1] = 900_000; pause_ns[2] = 1_500_000;
+    $display("");
+    $display("[LEG-PAUSE] one leg pauses ~1 ms while the other streams: after it resumes every frame must be right-or-flagged, then strict-correct");
+
+    tb_top.tail_ch[0].asic_model.data_mode = MODE_UNIQUE;
+    tb_top.tail_ch[3].asic_model.data_mode = MODE_UNIQUE;
+    hx_armed_mask = 4'h9;
+
+    tb_top.u_ft600q.send_command_frame(CMD_MAGIC, flags_wr(), REG_SPI_EN_MASK, 16'h0009);
+    tb_top.u_ft600q.wait_response_frame_typed(m, f, a, d);
+    tb_top.u_ft600q.send_command_frame(CMD_MAGIC, flags_wr(), REG_SPI_CLK_DIV, 16'h001F);
+    tb_top.u_ft600q.wait_response_frame_typed(m, f, a, d);
+    #200;
+    for (ch = 0; ch < 4; ch += 3) begin
+`ifdef ICARUS
+        tx = 48'h01_11_00_00_00_00; spi_cfg_xact(ch[1:0], tx, 3'd2, rx);
+        tx = 48'h02_01_00_00_00_00; spi_cfg_xact(ch[1:0], tx, 3'd2, rx);
+`else
+        tx = '{8'h01, 8'h11, 8'h00, 8'h00, 8'h00, 8'h00}; spi_cfg_xact(ch[1:0], tx, 3'd2, rx);
+        tx = '{8'h02, 8'h01, 8'h00, 8'h00, 8'h00, 8'h00}; spi_cfg_xact(ch[1:0], tx, 3'd2, rx);
+`endif
+    end
+    tb_top.u_ft600q.send_command_frame(CMD_MAGIC, flags_wr(), 16'h0140, 16'h0009);
+    tb_top.u_ft600q.wait_response_frame_typed(m, f, a, d);
+`ifdef ICARUS
+    tb_top.u_ft600q.flush_tx_capture(n_flush);
+`else
+    begin logic [15:0] fw [0:4095]; tb_top.u_ft600q.flush_tx_capture(fw, n_flush); end
+`endif
+    tb_top.u_ft600q.enable_frame_trace(1'b1);
+
+    hx_grab_frame(hdr);
+    window_clean = 0;
+    for (i = 0; i < SETTLE_FRAMES; i++) begin
+        hx_grab_frame(hdr); frame_no++;
+        hx_judge_frame(frame_no, n_pass, n_fail, all_clean);
+        if (all_clean) begin window_clean = 1; break; end
+    end
+    if (window_clean) n_pass++;
+    else begin n_fail++; $display("[LEG-PAUSE] FAIL start-up: no all-clean frame within %0d frames", SETTLE_FRAMES); end
+
+    for (k = 0; k < N_PAUSE; k++) begin
+        // steady state
+        for (i = 0; i < 3; i++) begin hx_grab_frame(hdr); frame_no++; hx_judge_frame(frame_no, n_pass, n_fail, all_clean); end
+        $display("[LEG-PAUSE] pause %0d: LEG5's ASIC clock off for %0d us (LEG8 keeps streaming)  t=%0t", k, pause_ns[k] / 1000, $time);
+        cfg_write2(2'd0, 8'h01, 8'h01);              // tail 0 CTRL: RO_RSTn=1, MCLK_EN=0 -> no RO1_CLK -> no words
+        #(pause_ns[k]);
+        cfg_write2(2'd0, 8'h01, 8'h11);              // clock back
+        $display("[LEG-PAUSE] pause %0d: clock back  t=%0t", k, $time);
+        // Judge the frames from the pause onward: the engine stalled and then
+        // released, so several piled up; judge the two oldest, skip the pile,
+        // then judge JUDGE_AFTER live frames — every one right-or-flagged, and an
+        // all-clean one within RECOVER_FRAMES.
+        pending = tb_top.u_ft600q.telem_frames_pending();
+        for (i = 0; i < 2 && i < pending - 2; i++) begin
+            hx_grab_frame(hdr); frame_no++;
+            hx_judge_frame(frame_no, n_pass, n_fail, all_clean);
+        end
+        tb_top.u_ft600q.keep_newest_telemetry_frames(2, dropped);
+        window_clean = 0;
+        for (i = 0; i < JUDGE_AFTER; i++) begin
+            hx_grab_frame(hdr); frame_no++;
+            $display("[LEG-PAUSE] frame[%0d] (after pause %0d, +%0d) cnt_lo=%0d phase={%04h %04h %04h %04h}",
+                     frame_no, k, i, tb_top.u_ft600q.v3_count_lo, hx_phase[0], hx_phase[1], hx_phase[2], hx_phase[3]);
+            hx_judge_frame(frame_no, n_pass, n_fail, all_clean);
+            if (all_clean && !window_clean) begin
+                window_clean = 1;
+                if (i < RECOVER_FRAMES) $display("[LEG-PAUSE] pause %0d: both legs strict-correct again after %0d frame(s)", k, i + 1);
+            end
+        end
+        if (window_clean) n_pass++;
+        else begin n_fail++; $display("[LEG-PAUSE] FAIL pause %0d: no all-correct frame within %0d frames of the resume", k, JUDGE_AFTER); end
+    end
+
+    if (tb_top.u_ft600q.puncture_count != 0) begin
+        n_fail += tb_top.u_ft600q.puncture_count;
+        $display("[LEG-PAUSE] FAIL %0d telemetry frame(s) punctured", tb_top.u_ft600q.puncture_count);
+    end
+    $display("");
+    if (n_fail == 0) $display("[LEG-PAUSE] PASS — %0d checks: a paused leg comes back right-or-flagged and re-aligns at plane offset 0", n_pass);
+    else             $display("[LEG-PAUSE] FAIL — %0d check(s) failed (%0d passed): a paused leg was re-admitted at an arbitrary word (unflagged plane offset) — the 16:28 recording", n_fail, n_pass);
+    $display("RESULTS: %0d passed, %0d failed", n_pass, n_fail);
+    $display("STATUS: %0s", (n_fail == 0) ? "PASS" : "FAIL");
+endtask
+`endif  // RUN_LEG_PAUSE
+
+`ifdef RUN_STREAM_DIES
+`define HX_NEED_CFG_WRITE2
+`endif
+`ifdef RUN_LEG_PAUSE
+`define HX_NEED_CFG_WRITE2
+`endif
+`ifdef HX_NEED_CFG_WRITE2
+// A WRITE-mode cfg transaction (rw=1): the only kind a streaming leg accepts
+// (reads and passthroughs to a running leg are rejected — fault bit 4).
+// 2 bytes: opcode + data.  ~25 us at the divided clock; wait 100 us.
+task automatic cfg_write2(input logic [1:0] c, input logic [7:0] b0, input logic [7:0] b1);
+    logic [15:0] mm, ff, aa, dd;
+    tb_top.u_ft600q.send_command_frame(CMD_MAGIC, flags_wr(), 16'h0030, {b0, b1});
+    tb_top.u_ft600q.wait_response_frame_typed(mm, ff, aa, dd);
+    tb_top.u_ft600q.send_command_frame(CMD_MAGIC, flags_wr(), 16'h0031, spi_cfg_ctrl_word(c, 1'b1, 1'b1, 3'd2));
+    tb_top.u_ft600q.wait_response_frame_typed(mm, ff, aa, dd);
+    #100_000;
+endtask
+`endif
+
 `ifdef RUN_STREAM_DIES
 // ---------------------------------------------------------------------------
 // STREAM-DIES — the tails go silent while RUN is set; the host must still be
@@ -323,17 +457,6 @@ endtask
 //      read must be answered, RUN=0 must be answered; MCLK back on + RUN → the
 //      stream is strict-correct again within SETTLE_FRAMES.
 // ---------------------------------------------------------------------------
-// A WRITE-mode cfg transaction (rw=1): the only kind a streaming leg accepts
-// (reads and passthroughs to a running leg are rejected — fault bit 4).
-// 2 bytes: opcode + data.  ~25 us at the divided clock; wait 100 us.
-task automatic cfg_write2(input logic [1:0] c, input logic [7:0] b0, input logic [7:0] b1);
-    logic [15:0] mm, ff, aa, dd;
-    tb_top.u_ft600q.send_command_frame(CMD_MAGIC, flags_wr(), 16'h0030, {b0, b1});
-    tb_top.u_ft600q.wait_response_frame_typed(mm, ff, aa, dd);
-    tb_top.u_ft600q.send_command_frame(CMD_MAGIC, flags_wr(), 16'h0031, spi_cfg_ctrl_word(c, 1'b1, 1'b1, 3'd2));
-    tb_top.u_ft600q.wait_response_frame_typed(mm, ff, aa, dd);
-    #100_000;
-endtask
 
 task automatic run_STREAM_DIES();
     localparam int SETTLE_FRAMES = 8;
