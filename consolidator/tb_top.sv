@@ -320,6 +320,7 @@ module tb_top;
         run_SM02();
         run_SM03();
         run_SM04();
+        run_SM05();
 
         // Consolidator common unit tests (fault, ESN)
         // C-05: run_CU02 uses 'ref' parameter — QuestaSim only; Icarus skips.

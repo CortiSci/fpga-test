@@ -54,3 +54,22 @@ task automatic run_SM04();
     tb_top.u_ft600q.send_command_frame(CMD_MAGIC, flags_wr(), REG_GPIO_DAISY, 16'h0000);
     tb_top.u_ft600q.wait_response_frame_typed(m, f, a, d);
 endtask
+
+// SM-05 — USB path diagnostics (2026-09-10): USB_RX_WORDS counts every command
+// word the decoder consumes (each 4-word command it answers has already been
+// counted, so two back-to-back reads differ by exactly 4), and USB_STS shows the
+// mover idle with a response not pending once the exchange is over.
+task automatic run_SM05();
+    logic [15:0] m, f, a, d1, d2, sts;
+    tb_top.u_ft600q.send_command_frame(CMD_MAGIC, flags_rd(), 16'h005E, 16'h0000);
+    tb_top.u_ft600q.wait_response_frame_typed(m, f, a, d1);
+    tb_top.u_ft600q.send_command_frame(CMD_MAGIC, flags_rd(), 16'h005E, 16'h0000);
+    tb_top.u_ft600q.wait_response_frame_typed(m, f, a, d2);
+    #2000;
+    tb_top.u_ft600q.send_command_frame(CMD_MAGIC, flags_rd(), 16'h005F, 16'h0000);
+    tb_top.u_ft600q.wait_response_frame_typed(m, f, a, sts);
+    if (d2 == d1 + 16'd4 && d1 >= 16'd4 && sts[5:0] == 6'b000001 && sts[14] == 1'b0)
+        $display("[SM-05] PASS (USB_RX_WORDS %0d -> %0d, USB_STS = 0x%04h: mover idle, no response pending)", d1, d2, sts);
+    else
+        $display("[SM-05] FAIL (USB_RX_WORDS %0d -> %0d, USB_STS = 0x%04h)", d1, d2, sts);
+endtask
