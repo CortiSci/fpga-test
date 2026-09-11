@@ -111,7 +111,7 @@ TAIL_PING, TAIL_CTRL, TAIL_TELEM_EN = 0xAA, 0x01, 0x02
 TAIL_CS1_PASS, TAIL_CS2_PASS = 0x03, 0x04      # next transaction -> ASIC Global (SS0) / Pixel chain (SS1)
 PIX_OFF, PIX_INJECT = [0xC5, 0x11, 0x01], [0xC5, 0x11, 0x07]   # the sweep's Pixel words (CannedFunctions.cpp)
 # The emulators' shared impedance model (Software Emulator/emulator/src/asic_pixel_model.h)
-MODEL_UV_PER_COUNT, MODEL_INJECT_A = 12.07, 65e-9
+MODEL_UV_PER_COUNT, MODEL_INJECT_A = 1.0493, 65e-9    # tool's mode-0 scale (5 Hz 1 mVpp probe, 2026-09-11)
 def model_z_ohms(asic: int, row: int, lane: int) -> float:
     return 1000.0 + 100.0 * (row * 16 + lane) + 25.0 * asic
 def model_swing_counts(asic: int, row: int, lane: int) -> int:

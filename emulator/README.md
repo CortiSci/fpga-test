@@ -92,9 +92,9 @@ chain rows 0/1/3, all four legs, against both emulators, with a `-f` file whose
 frames are identical so the peak-to-peak isolates the injection.  Both emulators
 share the ASIC pixel model (`Software Emulator/emulator/src/asic_pixel_model.h`:
 PSLICE select, per-slice chains committed at the frame boundary, EN_PIXEL → 0x8000,
-EN_IM → ±A with A = 65 nA × Z / 12.07 µV per count and the deterministic
+EN_IM → ±A with A = 65 nA × Z / 1.0493 µV per count and the deterministic
 Z = 1000 + 100·(row·16 + lane) + 25·asic Ω), so per pixel the **group** (63 − row)
-and the **swing** (2A, e.g. 1102 counts for row 0 lane 5) must agree between the
+and the **swing** (2A, e.g. 186 counts for row 0 lane 5 of ASIC 0) must agree between the
 sides and with the model; 13 checks.  The RTL side reaches the model through the
 tails' real `spi_passthrough.v` and a 24-bit SPI decoder on the exported
 `SPI_RO_*` pins; the SW side through `TailFpga`'s CS1/CS2 arming into `AsicBfm`.
