@@ -120,6 +120,7 @@ module tb_link_fault;
             @(negedge sclk); miso_in = parity_bit;           // parity
             @(negedge sclk); miso_in = 1'b0;                 // idle
             @(negedge sclk);                                 // let S_PAR/S_WAIT settle
+            @(negedge sclk);                                 // + the receiver's pad register (miso_q)
         end
     endtask
 

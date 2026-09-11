@@ -44,6 +44,19 @@
 //              pulse, the word still delivered, the anchor kept
 //   TC-ROT-05  a stop drops the anchor; the next start delivers nothing until
 //              the tail's next marker (the tail restarts at a sweep boundary)
+//   TC-ROT-06  anchor_flush (and every other output) is a REGISTERED function
+//              of MISO: changing the pad inside a cycle must not move it.  The
+//              2026-09-10 17:18/17:27 recordings (LEG8, three runs of 11..346
+//              frames at lattice offsets 7, 9, 10, unflagged) were the leg FIFO
+//              re-reading ring entries it had already delivered — its re-anchor
+//              flush reset the read pointer and count but not the write pointer.
+//              The flush was par_bad & (wcnt==0) & ~anchored with par_bad taken
+//              straight off the MISO pad: 13 pad routes into the receiver AND the
+//              FIFO's pointer slices, failing the 5 ns INPUT_SETUP pref by up to
+//              3.9 ns (.twr), so a marginal parity-bit edge reached some of the
+//              flush's flops and not others.  Registering MISO once at the pad
+//              makes every consumer see the same bit.  FAILS on the pad-driven
+//              receiver, PASSES with the input register.
 //
 //   Not tested (not in this receiver): w0_dist scan-phase export; the
 //   resync_arm / quad_flush re-anchor after a FIFO overflow.
@@ -63,6 +76,10 @@ module tb_rotation;
     wire        word_valid;
     wire        raw_word_done;
     wire        par_err_flag;
+    wire        anchor_flush;
+    reg         af0, af1;
+    reg         pbit_good;
+    reg  [15:0] tdata;
 
     // Declarations hoisted to the top of the scope (toolchain constraint C-10).
     integer     n_pass;
@@ -87,7 +104,9 @@ module tb_rotation;
         .word_valid    (word_valid),
         .raw_word_done (raw_word_done),
         .par_err_flag  (par_err_flag),
-        .phase_known   (phase_known)
+        .phase_known   (phase_known),
+        .anchor_flush  (anchor_flush),
+        .resync_req    (1'b0)
     );
 
     initial sclk = 1'b0;
@@ -125,6 +144,7 @@ module tb_rotation;
             @(negedge sclk); miso_in = pbit;
             @(negedge sclk); miso_in = 1'b0;
             @(negedge sclk);
+            @(negedge sclk);   // one more: the receiver registers the pad (miso_q, 2026-09-10)
         end
     endtask
 
@@ -203,6 +223,31 @@ module tb_rotation;
         send_word(16'h4321, 1'b0);          // marker
         send_word(16'hACED, 1'b1);
         check(phase_known === 1'b1 && wv_count === wv_before + 2, "TC-ROT-05c");
+
+        // -- TC-ROT-06: no output follows the MISO pad within a cycle -----------
+        // Put the receiver where the flush decision is live — un-anchored, at a
+        // group boundary, in the parity cycle of a word — and wiggle the pad
+        // between clock edges.  A registered MISO leaves anchor_flush where it
+        // was; the pad-driven receiver flips it with the pad (that combinational
+        // cone is what reached the FIFO's pointer flops with skew on hardware).
+        @(negedge sclk); run = 1'b0;                 // drop the anchor, wcnt -> 0
+        repeat (4) @(negedge sclk);
+        run = 1'b1;
+        repeat (8) @(negedge sclk);                  // S_ARM -> S_WAIT
+        tdata = 16'h0F0F; pbit_good = ^tdata;
+        @(negedge sclk); miso_in = 1'b1;             // START
+        for (i = 15; i >= 0; i = i - 1) begin
+            @(negedge sclk); miso_in = tdata[i];
+        end
+        @(negedge sclk);                             // parity cycle: state == S_PAR
+        miso_in = pbit_good;  #2; af0 = anchor_flush;
+        miso_in = ~pbit_good; #2; af1 = anchor_flush;
+        miso_in = pbit_good;  #2;                    // the edge samples good parity
+        check(af0 === af1, "TC-ROT-06a");            // no pad -> anchor_flush path
+        check(af0 === 1'b0, "TC-ROT-06b");           // and it was not flushing
+        @(negedge sclk); miso_in = 1'b0;             // idle
+        @(negedge sclk);
+        check(phase_known === 1'b0, "TC-ROT-06c");   // good parity: still no anchor
 
         $display("");
         $display("tb_rotation: %0d passed, %0d failed", n_pass, n_fail);
