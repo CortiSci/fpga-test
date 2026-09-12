@@ -598,7 +598,146 @@ def group_fifo(exe: Path):
 
 
 # ---------------------------------------------------------------------------
-# Group 5 — shutdown while a source is live
+# Group 5 — a switch must land on a frame boundary, never inside one
+# ---------------------------------------------------------------------------
+def frame_consts(f) -> tuple[list[int], bool]:
+    """For a frame whose source is a single repeated value, return the constant
+    each leg carries and whether every bit-plane is uniform.
+
+    Cheap on purpose (~8k ops rather than decode_normal's ~65k) so the reader
+    can check EVERY frame around a switch instead of sampling.  A source swapped
+    inside a sweep shows up two ways: the four ASICs are served one after the
+    other, so legs disagree; and a swap inside one leg leaves a plane that is
+    neither all-zeros nor all-ones."""
+    vals, uniform = [], True
+    for ch in range(4):
+        lw = dx.leg_words(f.words, ch, f.phases[ch])
+        if set(lw) - {0x0000, 0xFFFF}:
+            uniform = False
+        v = 0
+        for k in range(16):
+            if lw[k]:
+                v |= 1 << (15 - k)
+        vals.append(v)
+    return vals, uniform
+
+
+def usable(f) -> bool:
+    """Skip frames a leg was re-anchoring or underrunning through: their content
+    is legitimately not the source's."""
+    return all((p & 0x7000) == 0 and (p & 0x3FF) <= 63 for p in f.phases)
+
+
+def group_boundary(exe: Path):
+    print("\n[boundary] a new source starts on a frame boundary, never mid-frame")
+    emu = Emu(exe)
+    try:
+        if not emu.wait_ready():
+            check("boundary emulator starts", False, "no endpoint")
+            return
+        a = emu.dir / "constA.dat"
+        a.write_bytes(frame_bytes(111))
+        b = emu.dir / "constB.dat"
+        b.write_bytes(frame_bytes(222))
+
+        emu.start_stream()
+        c = emu.oob()
+
+        check("play constant A -> 0", emu.switch_to(c, str(a)) == 0)
+        ok, _, _ = emu.wait_sensors(lambda s: only(s) == {111}, max_frames=120)
+        check("constant A playing", ok)
+
+        def cross(to_path: str, want: int, budget: int = 900):
+            """Request a switch WITHOUT stopping the stream and inspect every
+            frame until the new constant appears.  Returns
+            (seen, n_torn, n_checked, first_torn)."""
+            c.request(to_path)
+            torn, checked, first = 0, 0, None
+            for _ in range(budget):
+                p = emu.pipe.next_frame(3.0)
+                if p is None:
+                    break
+                f = dx.Frame.parse(p)
+                if not usable(f):
+                    continue
+                vals, uni = frame_consts(f)
+                checked += 1
+                mixed = (len(set(vals)) != 1) or not uni
+                if mixed:
+                    torn += 1
+                    if first is None:
+                        first = (vals, uni)
+                if set(vals) == {want} and uni:
+                    return True, torn, checked, first
+            return False, torn, checked, first
+
+        seen, torn, checked, first = cross(str(b), 222)
+        check("A -> B seen mid-stream", seen, f"{checked} frames inspected")
+        check("A -> B: no frame split across the two files", torn == 0,
+              f"{torn} torn of {checked}" + (f", first={first}" if first else ""))
+
+        seen2, torn2, checked2, first2 = cross(str(a), 111)
+        check("B -> A seen mid-stream", seen2, f"{checked2} frames inspected")
+        check("B -> A: no frame split across the two files", torn2 == 0,
+              f"{torn2} torn of {checked2}" + (f", first={first2}" if first2 else ""))
+
+        # A handful of switches is not evidence: the emulator produces a sweep's
+        # 4096 lookups in a burst and then sleeps, so a request usually lands in
+        # the idle gap and is adopted at a boundary by luck alone.  Storming the
+        # endpoint puts requests INSIDE those bursts, which is the only way to
+        # show the boundary rule is doing the work.
+        stop_storm = threading.Event()
+        n_req = [0]
+
+        def storm():
+            i = 0
+            while not stop_storm.is_set():
+                try:
+                    c.request(str(a) if i % 2 == 0 else str(b), timeout=5)
+                except Exception:                       # noqa: BLE001
+                    break
+                n_req[0] += 1
+                i += 1
+                time.sleep(0.004)
+
+        th = threading.Thread(target=storm, daemon=True)
+        th.start()
+        torn_s = checked_s = 0
+        seen_s: set[int] = set()
+        first_s = None
+        t_end = time.time() + 8.0
+        while time.time() < t_end:
+            p = emu.pipe.next_frame(3.0)
+            if p is None:
+                break
+            f = dx.Frame.parse(p)
+            if not usable(f):
+                continue
+            vals, uni = frame_consts(f)
+            checked_s += 1
+            if len(set(vals)) != 1 or not uni:
+                torn_s += 1
+                if first_s is None:
+                    first_s = (vals, uni)
+            else:
+                seen_s.add(vals[0])
+        stop_storm.set()
+        th.join(timeout=10)
+
+        check("switch storm: both files observed", {111, 222} <= seen_s,
+              f"{n_req[0]} requests, values seen={sorted(seen_s)[:4]}")
+        check("switch storm: enough frames inspected", checked_s >= 100,
+              f"{checked_s} frames over {n_req[0]} switches")
+        check("switch storm: no frame split across two files", torn_s == 0,
+              f"{torn_s} torn of {checked_s}" + (f", first={first_s}" if first_s else ""))
+        check("emulator alive after boundary switches", emu.alive())
+        c.close()
+    finally:
+        emu.stop()
+
+
+# ---------------------------------------------------------------------------
+# Group 6 — shutdown while a source is live
 # ---------------------------------------------------------------------------
 def group_shutdown(exe: Path):
     print("\n[shutdown] stopping while a writer-less FIFO is open")
@@ -644,7 +783,8 @@ def main() -> int:
         return 0
 
     print(f"OOB endpoint tests — {a.exe}")
-    for g in (group_protocol, group_connections, group_playback, group_fifo, group_shutdown):
+    for g in (group_protocol, group_connections, group_playback, group_fifo,
+              group_boundary, group_shutdown):
         try:
             g(a.exe)
         except Exception as e:                          # noqa: BLE001
