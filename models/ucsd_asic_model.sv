@@ -284,7 +284,7 @@ module ucsd_asic_model
             spi_bit_cnt    <= 3'd0;
             spi_first_byte <= 1'b1;
             spi_tx_byte    <= 8'h0;
-        end else if (!spi_ss0_n || !spi_ss1_n) begin
+        end else if (!spi_ss0_n) begin
             spi_shift <= {spi_shift[6:0], spi_mosi};
             if (spi_bit_cnt == 3'd7) begin
                 spi_bit_cnt <= 3'd0;
@@ -308,11 +308,32 @@ module ucsd_asic_model
         end
     end
 
+    // -------------------------------------------------------------------------
+    // Pixel register (SS1): the 1536-bit shift chain (64 rows x 24 bits).  The
+    // ASIC has no readable registers (UCSD: the config port is loopback only);
+    // what it has is this chain, whose FAR END shifts out on MISO while a new
+    // word shifts in.  That echo is the only read-back the chip offers and it
+    // is what the BER Test scores (2026-09-14, hardware: bit-exact at 27 bits
+    // per read-mode transaction — 24 data + the 3 trailing clocks the tail
+    // keeps in read mode — so this is a plain shift register clocked by every
+    // SCLK the tail forwards, never a byte-wise model).  Mode 0: shift in on
+    // the rising edge, present the next bit on the falling edge.
+    // -------------------------------------------------------------------------
+    reg [1535:0] pix_chain;
+    initial pix_chain = '0;
+
+    always @(posedge spi_sclk) begin
+        if (ro_rst_n && !spi_ss1_n)
+            pix_chain <= {pix_chain[1534:0], spi_mosi};
+    end
+
     always @(negedge spi_sclk or negedge ro_rst_n) begin
         if (!ro_rst_n)
             spi_miso <= 1'b1;   // tri-state equivalent: release MISO when ASIC in reset
-        else if (!spi_ss0_n || !spi_ss1_n)
+        else if (!spi_ss0_n)
             spi_miso <= spi_tx_byte[7 - spi_bit_cnt];
+        else if (!spi_ss1_n)
+            spi_miso <= pix_chain[1535];
         else
             spi_miso <= 1'b1;
     end
@@ -326,8 +347,11 @@ module ucsd_asic_model
     // Mode 0 (CPHA=0): slave must pre-drive MISO with MSB of response before the first
     // rising edge.  Without this, the exec FSM samples spi_miso=1 (idle-high pullup)
     // on the first rising edge, corrupting bit 7 of every received first byte.
-    always @(negedge spi_ss0_n, negedge spi_ss1_n) begin
+    always @(negedge spi_ss0_n) begin
         spi_miso <= spi_tx_byte[7];
+    end
+    always @(negedge spi_ss1_n) begin
+        if (ro_rst_n) spi_miso <= pix_chain[1535];
     end
 
     // =========================================================================
