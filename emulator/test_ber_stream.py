@@ -10,7 +10,8 @@ is driven here at the named pipe with the differential test's helpers and scored
 with the tool's rule:
 
     per leg, anchor on the first word delivered, then expected = previous + 1;
-    a leg-frame whose phase word carries par/ovf/undf or reports 1023 is skipped
+    a leg-frame whose phase word carries par or undf, or reports 1023, is skipped
+    (ovf is sticky on hardware and is not an exclusion by itself)
     (right-or-flagged: a flagged frame is not a bit error) and the leg re-anchors;
     a frame whose CRC fails is skipped whole.
 
@@ -84,7 +85,7 @@ class LegScore:
         self.frames_flagged = 0
 
     def frame(self, words: list[int], phase: int) -> None:
-        if (phase & 0x7000) or (phase & 0x3FF) == 0x3FF:
+        if (phase & 0x5000) or (phase & 0x3FF) == 0x3FF:   # par | undf | no phase; ovf (0x2000) is sticky, not an exclusion
             self.frames_flagged += 1
             self.exp = None
             return
@@ -99,6 +100,66 @@ class LegScore:
         self.bits += 16 * len(words)
         self.exp = (exp + len(words)) & 0xFFFF
         self.frames_scored += 1
+
+
+def poisson_upper_95(k: int) -> float:
+    """95% upper bound on a Poisson mean given k observed = chi2(0.95; 2k+2)/2 (bisection on the CDF)."""
+    import math
+    def cdf(lam: float) -> float:
+        term = math.exp(-lam); total = term
+        for i in range(1, k + 1):
+            term *= lam / i; total += term
+        return total
+    lo, hi = 0.0, 1.0
+    while cdf(hi) > 0.05:
+        hi *= 2
+    for _ in range(200):
+        mid = (lo + hi) / 2
+        if cdf(mid) > 0.05: lo = mid
+        else: hi = mid
+    return (lo + hi) / 2
+
+
+def decide(bits: int, errs: int, n_target: int, accept: float, excluded_frac: float, max_excluded: float) -> tuple[str, float]:
+    """IONMA-171 v14, one run: Pass / Fail / Inconclusive with the demonstrated BER U."""
+    u = poisson_upper_95(errs) / bits if bits else float("inf")
+    if bits < n_target or excluded_frac > max_excluded:
+        return "Inconclusive", u
+    return ("Pass" if u <= accept else "Fail"), u
+
+
+def decide_with_retest(run1: tuple[int, int, float], run2: tuple[int, int, float] | None,
+                       n_target: int, accept: float, retest_mult: int, max_excluded: float) -> tuple[str, float]:
+    """Pooled retest (REQ 12): a Fail/Inconclusive first run is followed once by R x N more bits and the
+    decision is made on the combined count.  run = (bits, errs, excluded_frac)."""
+    out, u = decide(run1[0], run1[1], n_target, accept, run1[2], max_excluded)
+    if out == "Pass" or retest_mult == 0 or run2 is None:
+        return out, u
+    b = run1[0] + run2[0]; k = run1[1] + run2[1]
+    excl = (run1[2] * run1[0] + run2[2] * run2[0]) / max(b, 1)
+    return decide(b, k, n_target * (1 + retest_mult), accept, excl, max_excluded)
+
+
+def group_decision() -> None:
+    """The requirement's arithmetic, offline: the table in the IONMA-171 v14 redline."""
+    N, B = 100_000_000, 1e-7
+    check("k=0 over N=1e8 passes at 1e-7 (U=3.0e-8)", decide(N, 0, N, B, 0, 0.05)[0] == "Pass",
+          f"U={decide(N, 0, N, B, 0, 0.05)[1]:.3e}")
+    u4 = decide(N, 4, N, B, 0, 0.05)
+    check("k=4 over N=1e8 passes (U=9.15e-8)", u4[0] == "Pass" and abs(u4[1] - 9.15e-8) < 0.05e-8, f"U={u4[1]:.3e}")
+    u5 = decide(N, 5, N, B, 0, 0.05)
+    check("k=5 over N=1e8 fails (U=1.05e-7)", u5[0] == "Fail" and u5[1] > B, f"U={u5[1]:.3e}")
+    check("fewer than N bits is Inconclusive, not Pass", decide(N // 2, 0, N, B, 0, 0.05)[0] == "Inconclusive")
+    check("excluded frames above the maximum is Inconclusive", decide(N, 0, N, B, 0.06, 0.05)[0] == "Inconclusive")
+    check("minimum passing run is N = 3/B", decide(int(3 / B) + 1, 0, int(3 / B), B, 0, 0.05)[0] == "Pass"
+          and decide(int(2.9 / B), 0, int(2.9 / B), B, 0, 0.05)[0] == "Fail")
+    pooled = decide_with_retest((N, 5, 0.0), (2 * N, 0, 0.0), N, B, 2, 0.05)
+    check("pooled retest: k=5/N then 0/2N -> 5 over 3N passes (U=3.5e-8)", pooled[0] == "Pass" and pooled[1] < B, f"{pooled}")
+    pooled2 = decide_with_retest((N, 5, 0.0), (2 * N, 6, 0.0), N, B, 2, 0.05)
+    check("pooled retest: 11 errors over 3N still passes (U=6.1e-8)", pooled2[0] == "Pass" and abs(pooled2[1] - 6.07e-8) < 0.1e-8, f"{pooled2}")
+    pooled3 = decide_with_retest((N, 5, 0.0), (2 * N, 20, 0.0), N, B, 2, 0.05)
+    check("pooled retest: 25 errors over 3N fails (U=1.16e-7)", pooled3[0] == "Fail" and pooled3[1] > B, f"{pooled3}")
+    check("no retest when R = 0", decide_with_retest((N, 5, 0.0), (2 * N, 0, 0.0), N, B, 0, 0.05)[0] == "Fail")
 
 
 def start_self_test_stream(h: dx.Host) -> None:
@@ -188,6 +249,7 @@ def main() -> int:
 
     print(f"BER Test over the acquisition stream — {a.exe}")
     try:
+        group_decision()
         run(a.exe, a.frames)
     except Exception as e:                              # noqa: BLE001
         check("run completed", False, f"{type(e).__name__}: {e}")

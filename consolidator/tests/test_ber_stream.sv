@@ -19,9 +19,10 @@
 //
 // Scoring is the tool's: per leg, anchor on the first word delivered, then every
 // later word is compared bit-wise against expected = previous expected + 1
-// (mod 2^16); a leg-frame whose phase word carries par/ovf/undf, or reports no
+// (mod 2^16); a leg-frame whose phase word carries par or undf, or reports no
 // usable phase (1023), is skipped and the leg re-anchors — right-or-flagged is
-// the contract, and a flagged frame is not a bit error.
+// the contract, and a flagged frame is not a bit error.  ovf is sticky and is
+// not an exclusion on its own.
 // ---------------------------------------------------------------------------
 `ifdef RUN_BER_STREAM
 
@@ -57,7 +58,11 @@ task automatic bers_score_frame();
     bit          flagged;
     for (int ch = 0; ch < 4; ch++) begin
         ph      = bers_phase[ch];
-        flagged = (ph[14:12] != 3'b000) || (ph[9:0] == 10'd1023);
+        // par (bit 14) or undf (bit 12) excuse the frame; ovf (bit 13) is STICKY on the
+        // hardware once a leg has ever overflowed and by itself says nothing about this
+        // frame's data (the 21:03 hardware run: 4924 of 4985 frames carried it) -- the
+        // jitter benches' rule: only undf/par excuse wrong data.
+        flagged = ph[14] || ph[12] || (ph[9:0] == 10'd1023);
         if (flagged) begin
             bers_frames_flagged[ch]++;
             bers_anchored[ch] = 0;                       // re-anchor on the next clean frame
