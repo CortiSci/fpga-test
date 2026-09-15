@@ -162,15 +162,53 @@ def group_decision() -> None:
     check("no retest when R = 0", decide_with_retest((N, 5, 0.0), (2 * N, 0, 0.0), N, B, 0, 0.05)[0] == "Fail")
 
 
-def start_self_test_stream(h: dx.Host) -> None:
-    """startSelfTestStream(): 800 kHz cfg SPI, all legs enabled, per tail CTRL 0x11 + SELF_TEST + TELEM_EN, then RUN."""
+def start_self_test_stream(h: dx.Host, leg_mask: int = 0xF) -> None:
+    """startSelfTestStream(mask): 800 kHz cfg SPI, MCLK on every tail, the selected legs enabled with
+    CTRL 0x11 + SELF_TEST + TELEM_EN, then RUN on those legs."""
     h.p.write_reg(dx.REG_SPI_CLK_DIV, 31, h.t, h.stray)
-    h.p.write_reg(dx.REG_SPI_ENABLE_MASK, 0x000F, h.t, h.stray)
     for ch in range(4):
+        h.spi_xact(ch, 2, [dx.TAIL_CTRL, 0x10], False)          # MCLK_EN board-wide
+    h.p.write_reg(dx.REG_SPI_ENABLE_MASK, leg_mask, h.t, h.stray)
+    for ch in range(4):
+        if not (leg_mask >> ch) & 1:
+            continue
         h.spi_xact(ch, 2, [dx.TAIL_CTRL, dx.CTRL_RUN], False)
         h.spi_xact(ch, 2, [TAIL_SELF_TEST, 1], False)
         h.spi_xact(ch, 2, [dx.TAIL_TELEM_EN, 1], False)
-    h.p.write_reg(dx.REG_ACQ_ALL_RUN, 0x000F, h.t, h.stray)
+    h.p.write_reg(dx.REG_ACQ_ALL_RUN, leg_mask, h.t, h.stray)
+
+
+def run_masked(exe: Path, leg_mask: int = 0x5, n_frames: int = 100) -> None:
+    """The dialog's tail checkboxes: only the selected legs stream and are scored; the
+    others are zero-fill in the frame (their leg quarter is all 0x0000)."""
+    emu = Emu(exe)
+    try:
+        start_self_test_stream(emu.host, leg_mask)
+        legs = [LegScore() for _ in range(4)]
+        idle_nonzero = 0
+        taken = 0
+        t0 = time.time()
+        while taken < n_frames + 2 and time.time() - t0 < 30:
+            p = emu.pipe.next_frame(5.0)
+            if p is None:
+                break
+            fr = dx.Frame.parse(p)
+            taken += 1
+            if taken <= 2 or not fr.crc_ok:
+                continue
+            for ch in range(4):
+                q = fr.words[3 + ch:3 + 4096:4]
+                if (leg_mask >> ch) & 1:
+                    legs[ch].frame(q, fr.phases[ch])
+                elif any(q):
+                    idle_nonzero += 1
+        sel = [ch for ch in range(4) if (leg_mask >> ch) & 1]
+        check(f"leg mask 0x{leg_mask:X}: the selected legs stream and are bit-exact",
+              all(legs[ch].frames_scored > 0 and legs[ch].errs == 0 for ch in sel),
+              "/".join(f"leg{5 + ch}: {legs[ch].frames_scored} frames, k={legs[ch].errs}" for ch in sel))
+        check(f"leg mask 0x{leg_mask:X}: the unselected legs are zero-fill", idle_nonzero == 0, f"{idle_nonzero} non-zero idle leg-frames")
+    finally:
+        emu.stop()
 
 
 def run(exe: Path, n_frames: int) -> None:
@@ -251,6 +289,7 @@ def main() -> int:
     try:
         group_decision()
         run(a.exe, a.frames)
+        run_masked(a.exe, 0x5)
     except Exception as e:                              # noqa: BLE001
         check("run completed", False, f"{type(e).__name__}: {e}")
 
