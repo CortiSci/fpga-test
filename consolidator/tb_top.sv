@@ -294,6 +294,7 @@ module tb_top;
     `include "tests/test_single_leg.sv"
     `include "tests/test_host_xact.sv"
     `include "tests/test_watchdog.sv"
+    `include "tests/test_ber_stream.sv"
 
     // =========================================================================
     // Main test sequence (default — runs when no other define selects a suite)
@@ -309,6 +310,7 @@ module tb_top;
 `ifndef RUN_UNIQUE
 `ifndef RUN_HOST_XACT
 `ifndef RUN_WD_BITE
+`ifndef RUN_BER_STREAM
     initial begin
         @(posedge devrst_n);
         #500;
@@ -352,6 +354,7 @@ module tb_top;
         #10_000_000;  // 10 ms — SM + CU + CV + SP well within budget
         $fatal(1, "[TB] Simulation timeout: V2 tests did not finish within 10 ms");
     end
+`endif  // !RUN_BER_STREAM
 `endif  // !RUN_WD_BITE
 `endif  // !RUN_HOST_XACT
 `endif  // !RUN_SILENT_CONTROL
@@ -573,6 +576,25 @@ module tb_top;
     initial begin
         #30_000_000;
         $fatal(1, "[TB_SILENT_CTRL] Timeout: silent control arbitration did not complete within 30 ms");
+    end
+`endif
+
+    // =========================================================================
+    // BER Test over the acquisition stream: four tails in self-test, every
+    // delivered word compared with the counter (compiled with RUN_BER_STREAM;
+    // see tests/test_ber_stream.sv)
+    // =========================================================================
+`ifdef RUN_BER_STREAM
+    initial begin
+        @(posedge devrst_n);
+        #500;
+        run_BER_STREAM();
+        #1000;
+        $finish;
+    end
+    initial begin
+        #100_000_000;   // 100 ms: bring-up plus eight 400 us frames
+        $fatal(1, "[TB_BER_STREAM] Timeout: acquisition-stream BER bench did not complete within 100 ms");
     end
 `endif
 
