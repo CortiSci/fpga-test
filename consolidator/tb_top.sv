@@ -293,6 +293,7 @@ module tb_top;
     `include "tests/test_silent_control.sv"
     `include "tests/test_single_leg.sv"
     `include "tests/test_host_xact.sv"
+    `include "tests/test_usb_microstall.sv"
     `include "tests/test_watchdog.sv"
     `include "tests/test_ber_stream.sv"
 
@@ -426,6 +427,8 @@ module tb_top;
         run_LEG_PAUSE();         // one leg pauses ~1 ms: re-admission at plane offset 0 (tests/test_host_xact.sv)
 `elsif RUN_IMP_CYCLE
         run_IMP_CYCLE();         // the impedance sweep's per-pixel command cycle (tests/test_host_xact.sv)
+`elsif RUN_USB_MICROSTALL
+        run_SA_USB_MICROSTALL(); // the 2026-09-15 dips: USB micro-stalls vs the leg FIFOs (tests/test_usb_microstall.sv)
 `else
         run_SA_HOST_XACT();
 `endif

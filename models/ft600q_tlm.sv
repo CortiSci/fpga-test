@@ -24,6 +24,7 @@
 //   flush_tx_capture(out words[], out n)
 //   --- §2 additions ---
 //   set_txe_random_backpressure(enable, probability_ppm, min_cycles, max_cycles)
+//   set_txe_drain_limit(words_per_cycle_x1000, burst_words)   the High-Speed ceiling
 //   set_txe_stress_preset()
 //   get_bp_stats(out events, out cycles, out words_stalled)
 //   set_rxf_packet_gap(words_per_packet, gap_cycles)
@@ -124,9 +125,23 @@ module ft600q_tlm #(
     int         bp_rand_min_cycles  = 5;
     int         bp_rand_max_cycles  = 200;
     int         bp_rand_remain      = 0;      // cycles remaining in current burst
-    // Combined: TXE_N high when bp_force OR bp_rand_remain > 0
+    // Rate-limited drain (2026-09-15): the High-Speed CEILING.  The real FT600's
+    // 4 KB IN FIFO absorbs the FPGA's writes while USB drains it at a fixed rate;
+    // TXE_N rises only when that FIFO is full.  Token bucket: bp_rate_x1000
+    // credits (words x 1000) per clk_66m cycle, a captured word costs 1000, the
+    // bucket holds at most bp_rate_burst words.  0 = unlimited (default).  The
+    // engine fills 4105 words per 400 us = 155.5 x 1e-3 words/cycle; the bench
+    // PC at High-Speed drained ~1.5 % faster (set_txe_drain_limit(158, 2048)).
+    int         bp_rate_x1000 = 0;
+    int         bp_rate_burst = 2048;
+    longint     bp_rate_credit = 0;
+    // TXE_N rises when the bucket is empty and falls again only once a USB
+    // High-Speed packet's worth (256 words) has drained -- the real chip's
+    // hysteresis; a limiter toggling TXE_N every few cycles is not a FIFO.
+    reg         bp_rate_block = 1'b0;
+    // Combined: TXE_N high when bp_force OR bp_rand_remain > 0 OR the drain limit is exhausted
     wire        txe_high_any;
-    assign      txe_high_any = bp_force | (bp_rand_remain > 0);
+    assign      txe_high_any = bp_force | (bp_rand_remain > 0) | bp_rate_block;
 
     // Backpressure statistics (§2.1)
     int         bp_stat_events       = 0;
@@ -260,6 +275,27 @@ module ft600q_tlm #(
                 end
                 end  // rxf_count_la
             end
+        end
+    end
+
+    // -------------------------------------------------------------------------
+    // Rate-limited drain: the token bucket (see bp_rate_* above)
+    // -------------------------------------------------------------------------
+    always @(posedge clk_66m or negedge rst_n) begin
+        if (!rst_n) begin
+            bp_rate_credit <= 0;
+            bp_rate_block  <= 1'b0;
+        end else if (bp_rate_x1000 == 0) begin
+            bp_rate_credit <= longint'(bp_rate_burst) * 1000;
+            bp_rate_block  <= 1'b0;
+        end else begin
+            longint c;
+            c = bp_rate_credit + bp_rate_x1000 - ((!wr_n && !txe_n) ? 1000 : 0);
+            if (c > longint'(bp_rate_burst) * 1000) c = longint'(bp_rate_burst) * 1000;
+            if (c < 0) c = 0;
+            bp_rate_credit <= c;
+            if (c < 1000)             bp_rate_block <= 1'b1;
+            else if (c >= 256 * 1000) bp_rate_block <= 1'b0;
         end
     end
 
@@ -669,6 +705,15 @@ module ft600q_tlm #(
         bp_rand_min_cycles = min_cycles;
         bp_rand_max_cycles = max_cycles;
         if (!enable) bp_rand_remain = 0;
+    endtask
+
+    // Rate-limited drain: at most `words_per_cycle_x1000`/1000 words per clk_66m
+    // cycle on average, with a `burst_words` bucket (the FT600's 4 KB IN FIFO =
+    // 2048 words).  0 = unlimited.  158 models the bench PC at High-Speed.
+    task automatic set_txe_drain_limit(input int words_per_cycle_x1000, input int burst_words);
+        bp_rate_x1000 = words_per_cycle_x1000;
+        bp_rate_burst = burst_words;
+        if (words_per_cycle_x1000 == 0) bp_rate_credit = longint'(burst_words) * 1000;
     endtask
 
     // Preset: realistic worst-case stress (~5% of write cycles, 5–200 cycle bursts).
