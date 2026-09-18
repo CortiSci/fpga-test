@@ -294,6 +294,7 @@ module tb_top;
     `include "tests/test_single_leg.sv"
     `include "tests/test_host_xact.sv"
     `include "tests/test_usb_microstall.sv"
+    `include "tests/test_dead_leg_ceiling.sv"
     `include "tests/test_watchdog.sv"
     `include "tests/test_ber_stream.sv"
 
@@ -429,6 +430,8 @@ module tb_top;
         run_IMP_CYCLE();         // the impedance sweep's per-pixel command cycle (tests/test_host_xact.sv)
 `elsif RUN_USB_MICROSTALL
         run_SA_USB_MICROSTALL(); // the 2026-09-15 dips: USB micro-stalls vs the leg FIFOs (tests/test_usb_microstall.sv)
+`elsif RUN_DEAD_LEG_CEILING
+        run_DEAD_LEG_CEILING();  // the 2026-09-18 13:01 drops: a dead enabled leg at the High-Speed ceiling (tests/test_dead_leg_ceiling.sv)
 `else
         run_SA_HOST_XACT();
 `endif
