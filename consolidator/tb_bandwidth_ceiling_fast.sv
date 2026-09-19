@@ -4,6 +4,11 @@
 // Input 20.5 MB/s, host ceiling 20.1 MB/s. Unlike the extended board bench,
 // there is no 2048-word FT600 credit or SPI/ASIC setup to simulate.
 module tb_bandwidth_ceiling_fast;
+`ifdef RECORDED_DEFICIT
+    localparam DRAIN_RATE=105, DEFICIT_END=6, RECOVERY_END=8;
+`else
+    localparam DRAIN_RATE=151, DEFICIT_END=15, RECOVERY_END=18;
+`endif
     reg clk=0, usb_clk=0, rst_n=0, start=0;
     always #10 clk=~clk;
     always #7.5 usb_clk=~usb_clk;
@@ -49,7 +54,11 @@ module tb_bandwidth_ceiling_fast;
     crc32 crc(.clk(clk),.rst_n(rst_n),.init(crc_init),.valid(crc_valid),.last(crc_last),
               .data_in(crc_data),.crc_out(crc_result),.crc_valid(crc_done));
     assign tx_ready=~cdc_almost;
+    `ifdef CEILING_LEGACY_BUFFER
     cdc_fifo #(.WIDTH(16),.DEPTH_LOG2(9)) output_fifo(
+`else
+    telem_tx_fifo output_fifo(
+`endif
         .wr_clk(clk),.wr_rst_n(rst_n),.wr_data(tx_data),.wr_en(tx_valid && !cdc_full),
         .wr_full(cdc_full),.wr_almost_full(cdc_almost),
 `ifndef CEILING_LEGACY_ENGINE
@@ -151,12 +160,12 @@ module tb_bandwidth_ceiling_fast;
             wait(frames>=3);
             check(errors==0,"unlimited host: complete ordered frames, phase flags and CRC");
             initial_gaps=gaps;
-            drain_rate=151;
-            wait(frames>=15);
-            check(errors==0,"2% deficit: every delivered frame intact, dead leg flagged, CRC correct");
-            check(gaps>initial_gaps,"2% deficit: omitted input frames exposed by counter gaps");
+            drain_rate=DRAIN_RATE;
+            wait(frames>=DEFICIT_END);
+            check(errors==0,"bandwidth deficit: every delivered frame intact, dead leg flagged, CRC correct");
+            check(gaps>initial_gaps,"bandwidth deficit: omitted input frames exposed by counter gaps");
             drain_rate=1000;
-            wait(frames>=18);
+            wait(frames>=RECOVERY_END);
             check(errors==0,"unlimited host restored: clean recovery");
             $display("[CEILING] mask=%h delivered=%0d gaps=%0d errors=%0d",mask,frames,gaps,errors);
         end
