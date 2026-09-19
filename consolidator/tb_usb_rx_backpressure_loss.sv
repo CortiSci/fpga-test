@@ -41,7 +41,7 @@ module tb_usb_rx_backpressure_loss;
     wire mover_ready = ~fifo_almost_full & ~fifo_full;   // consolidator_v2_top fsm_rx_ready
     wire fifo_read   = ~fifo_empty;                       // cmd_decoder in ST_RX: rx_ready=1
     integer delivered=0, strobed=0, written=0, written_full=0, failures=0, sequence_errors=0;
-    integer stall_exits=0, guarded_discards=0, uncaptured=0;
+    integer stall_exits=0, exit_reads=0;
     reg [15:0] expected_words[0:N_WORDS-1];
 
     ft600q_tlm model(.clk_66m(usb_clk),.rst_n(rst_n),.usb_fifo_d(usb_d),
@@ -77,15 +77,15 @@ module tb_usb_rx_backpressure_loss;
     // ---- the boundary: READ_DATA -> READ_POST because ready fell --------------
     // Evaluated just before the edge that performs the transition.  RD_N is the
     // registered value the FT600 samples at this edge; a low RD_N here means the
-    // chip dequeues once more.  usb_d_pipe holds the word dequeued one edge ago.
+    // chip dequeues once more. Check final accounting independently of the
+    // mover's internal capture pipeline (removed by the receive fix).
     always @(posedge usb_clk) if (rst_n &&
             mover.current_state==mover.STATE_READ_DATA &&
             mover.next_state==mover.STATE_READ_POST && !mover_ready) begin
         stall_exits=stall_exits+1;
-        $display("[RX-BP] ready-low exit #%0d at %0t: FT600 dequeued=%0d  strobed=%0d  written=%0d  RD_N=%b  RXF_N=%b  (word in pipe %04h, on bus %04h)",
-                 stall_exits,$time,model.rx_rd_ptr,strobed,written,rd_n,rxf_n,mover.usb_d_pipe,usb_d);
-        if (mover.rd_n_was_low) guarded_discards=guarded_discards+1;   // READ_POST capture is guarded by ready
-        if (!rd_n && !rxf_n)   uncaptured=uncaptured+1;                // dequeued at this edge, no later capture
+        $display("[RX-BP] ready-low exit #%0d at %0t: FT600 dequeued=%0d  strobed=%0d  written=%0d  RD_N=%b  RXF_N=%b  bus=%04h",
+                 stall_exits,$time,model.rx_rd_ptr,strobed,written,rd_n,rxf_n,usb_d);
+        if (!rd_n && !rxf_n) exit_reads=exit_reads+1;
     end
 
     // The FIFO is FWFT: check the head on the edge that consumes it.
@@ -129,8 +129,8 @@ module tb_usb_rx_backpressure_loss;
 
         $display("[RX-BP] accepted by FT600=%0d  strobed by mover=%0d  written to CDC=%0d  (strobes into a full CDC=%0d)  read by core=%0d",
                  model.rx_rd_ptr,strobed,written,written_full,delivered);
-        $display("[RX-BP] ready-low exits=%0d  guarded READ_POST discards=%0d  dequeued-at-exit never captured=%0d  -> %0d words lost in the mover, %0d in the FIFO",
-                 stall_exits,guarded_discards,uncaptured,model.rx_rd_ptr-strobed,strobed-written);
+        $display("[RX-BP] ready-low exits=%0d  reads at exit=%0d  -> %0d words lost in the mover, %0d in the FIFO",
+                 stall_exits,exit_reads,model.rx_rd_ptr-strobed,strobed-written);
         if(model.rx_rd_ptr!=N_WORDS)
             fail("FT600 did not deliver the whole burst (bench/model problem, not the DUT)");
         if(stall_exits==0)
