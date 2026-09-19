@@ -969,7 +969,7 @@ task automatic run_SA_USB_STALL_CMDS();
 
     if (tb_top.u_ft600q.overflow_drop_count != 0) begin
         n_fail++;
-        $display("[SA-USBSTALL-CMDS] FAIL %0d word(s) written while TXE_N was high (dropped by the FT600)", tb_top.u_ft600q.overflow_drop_count);
+        $display("[SA-USBSTALL-CMDS] FAIL %0d write attempts beyond the full-flag response cycle", tb_top.u_ft600q.overflow_drop_count);
     end else n_pass++;
     if (tb_top.u_ft600q.puncture_count != 0) begin
         n_fail += tb_top.u_ft600q.puncture_count;
@@ -1141,7 +1141,7 @@ task automatic run_IMP_CYCLE();
     n_pass += ic_npass; n_fail += ic_nfail;
     if (tb_top.u_ft600q.overflow_drop_count != 0) begin
         n_fail++;
-        $display("[SA-IMP-CYCLE] FAIL %0d word(s) written while TXE_N was high (dropped by the FT600)", tb_top.u_ft600q.overflow_drop_count);
+        $display("[SA-IMP-CYCLE] FAIL %0d write attempts beyond the full-flag response cycle", tb_top.u_ft600q.overflow_drop_count);
     end else n_pass++;
     if (tb_top.u_ft600q.puncture_count != 0) begin
         n_fail += tb_top.u_ft600q.puncture_count;
@@ -1290,7 +1290,7 @@ task automatic run_SA_USB_STALL();
     // ── The FPGA must never write into a full FT600 ───────────────────────────
     if (tb_top.u_ft600q.overflow_drop_count != 0) begin
         n_fail++;
-        $display("[SA-USBSTALL] FAIL %0d word(s) written while TXE_N was high (dropped by the FT600)", tb_top.u_ft600q.overflow_drop_count);
+        $display("[SA-USBSTALL] FAIL %0d write attempts beyond the full-flag response cycle", tb_top.u_ft600q.overflow_drop_count);
     end else begin
         n_pass++;
         $display("[SA-USBSTALL] no write into a full FT600 across %0d gaps", N_STALL);
@@ -1551,7 +1551,7 @@ task automatic run_SA_USB_JITTER();
     // ── (5) the FPGA must never write into a full FT600; no puncture ──────────
     if (tb_top.u_ft600q.overflow_drop_count != 0) begin
         n_fail++;
-        $display("[SA-USBJITTER] FAIL %0d word(s) written while TXE_N was high (dropped by the FT600)", tb_top.u_ft600q.overflow_drop_count);
+        $display("[SA-USBJITTER] FAIL %0d write attempts beyond the full-flag response cycle", tb_top.u_ft600q.overflow_drop_count);
     end else n_pass++;
     if (tb_top.u_ft600q.puncture_count != 0) begin
         n_fail += tb_top.u_ft600q.puncture_count;
