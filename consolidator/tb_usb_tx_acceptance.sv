@@ -11,6 +11,7 @@ module tb_usb_tx_acceptance;
     assign #2.5 launch_clk=usb_clk;
     localparam N=1024;
     integer produced=0,consumed=0,accepted=0,mismatches=0,stalls=0,passes=0,failures=0;
+    integer first_write_queued=-1;
     wire [15:0] head,bus_data;
     wire full,almost,empty,ready,wr_n,rd_n,oe_n;
     wire [9:0] level;
@@ -34,6 +35,7 @@ module tb_usb_tx_acceptance;
     always @(posedge usb_clk) if(rst_n) begin
         if(ready && !empty) consumed=consumed+1;
         if(!wr_n && !txe_n) begin
+            if(first_write_queued<0) first_write_queued=produced;
             if(bus_data!==pattern(accepted)) begin
                 if(mismatches<4) $display("[TX-ACCEPT] mismatch index=%0d expected=%h got=%h",accepted,pattern(accepted),bus_data);
                 mismatches=mismatches+1;
@@ -62,6 +64,7 @@ module tb_usb_tx_acceptance;
         check(accepted==N,"sink accepted every word despite full transitions");
         check(mismatches==0,"accepted stream is exact and ordered");
         check(stalls==12,"all twelve full/resume boundaries exercised");
+        check(first_write_queued>=256,"initial write waits for a full USB packet to queue");
         $display("RESULTS: %0d passed, %0d failed",passes,failures);
         $display("STATUS: %s",failures==0?"PASS":"FAIL");
         $finish;
