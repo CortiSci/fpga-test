@@ -19,7 +19,8 @@
 //
 // Fixture: production mover + production 32-word cdc_fifo + the top level's
 // ready gate (~almost_full & ~full), the existing FT600 model, a normally
-// draining core.  No artificial core stall.  Every accepted word is accounted
+// draining core, or RX_CONSUMER_STALL holding it through the stop boundary.
+// Every accepted word is accounted
 // for at four points -- FT600 dequeue, mover strobe, actual CDC write
 // (wr_en & ~full), core read -- and every ready-low exit is logged with what it
 // cost.  Contract: every word the FT600 dequeued reaches the core exactly once,
@@ -39,7 +40,12 @@ module tb_usb_rx_backpressure_loss;
     wire fifo_full, fifo_almost_full, fifo_empty;
     wire [15:0] fifo_data;
     wire mover_ready = ~fifo_almost_full & ~fifo_full;   // consolidator_v2_top fsm_rx_ready
-    wire fifo_read   = ~fifo_empty;                       // cmd_decoder in ST_RX: rx_ready=1
+    `ifdef RX_CONSUMER_STALL
+    reg core_stall=1;
+`else
+    wire core_stall=0;
+`endif
+    wire fifo_read   = ~fifo_empty && !core_stall;                       // cmd_decoder in ST_RX: rx_ready=1
     integer delivered=0, strobed=0, written=0, written_full=0, failures=0, sequence_errors=0;
     integer stall_exits=0, exit_reads=0;
     reg [15:0] expected_words[0:N_WORDS-1];
@@ -121,6 +127,11 @@ module tb_usb_rx_backpressure_loss;
         end
         if(!fifo_almost_full) fail("receive FIFO never reached the backpressure boundary");
 
+        `ifdef RX_CONSUMER_STALL
+        // A decoder awaiting the end of a telemetry frame stops consuming.
+        // Hold through the registered stop and its trailing accepted word.
+        repeat(12) @(negedge core_clk); core_stall=0;
+`endif
         // Drain to quiescence: FT600 empty, CDC empty, mover idle.
         wait_cycles=0;
         while((model.rx_count()!=0 || !fifo_empty ||

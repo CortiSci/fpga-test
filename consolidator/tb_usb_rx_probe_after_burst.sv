@@ -29,6 +29,12 @@ module tb_usb_rx_probe_after_burst;
     always #10 core_clk=~core_clk;   // 50 MHz core (pll_48m CLKOP)
 
     localparam integer N_PKTS = 60;
+`ifdef FUZZ_WAITING_RESPONSE
+    localparam integer PREFIX_WORDS=4, PREFIX_RESPONSES=1;
+`else
+    localparam integer PREFIX_WORDS=0, PREFIX_RESPONSES=0;
+`endif
+    reg framer_busy=0;
 
     wire [15:0] usb_d;
     wire [1:0] usb_be;
@@ -64,7 +70,7 @@ module tb_usb_rx_probe_after_burst;
         .rx_ready(rx_ready),.tx_data(tx_data),.tx_valid(tx_valid),.tx_ready(tx_ready),
         .reg_addr(reg_addr),.reg_wdata(reg_wdata),.reg_we(reg_we),.reg_rdata(reg_rdata),
         .fault_src(5'b0),.fault_frame_sent(fault_frame_sent),.fault_flags_sent(fault_flags_sent),
-        .framer_busy(1'b0),.ctrl_early(ctrl_early));
+        .framer_busy(framer_busy),.ctrl_early(ctrl_early));
 
     integer failures=0, passes=0, writes=0, responses=0, resp_idx=0, burst_responses=0;
     reg [15:0] resp[0:3];
@@ -85,6 +91,10 @@ module tb_usb_rx_probe_after_burst;
             resp[resp_idx] = tx_data;
             if (resp_idx==3) begin
                 responses = responses+1;
+`ifdef FUZZ_WAITING_RESPONSE
+                if(responses==1 && (resp[0]!==16'h55aa || resp[1]!==0 || resp[2]!==16'h005e || resp[3]!==4))
+                    fail("initial deferred response is damaged");
+`endif
                 if (in_burst) burst_responses = burst_responses+1;
                 $display("[RX-PROBE] response #%0d: %04h %04h %04h %04h  (words consumed so far %0d)",
                          responses,resp[0],resp[1],resp[2],resp[3],rx_words);
@@ -148,9 +158,27 @@ module tb_usb_rx_probe_after_burst;
         repeat(5) @(negedge usb_clk); rst_n=1;
         repeat(4) @(negedge core_clk);
 
+        `ifdef FUZZ_WAITING_RESPONSE
+        // A real decoder response waits for a telemetry frame boundary.
+        // Meanwhile a host OUT burst can fill the RX CDC without any reads.
+        framer_busy=1;
+        model.send_command_frame(16'haa55,16'h0000,16'h005e,16'h0000);
+        waits=0;
+        while(rx_words!=4 && waits<1000) begin @(negedge core_clk); waits++; end
+        if(rx_words!=4) fail("initial valid command was not consumed");
+        repeat(10) @(negedge core_clk);
+        if(rx_ready) fail("decoder did not wait for the telemetry boundary");
+`endif
         // One contiguous FT600 burst of 60 malformed packets.
         in_burst=1;
         for (i=0;i<N_PKTS;i=i+1) queue_bad_magic_packet(i);
+`ifdef FUZZ_WAITING_RESPONSE
+        waits=0;
+        while(!fifo_almost_full && waits<1000) begin @(negedge core_clk); waits++; end
+        if(!fifo_almost_full) fail("burst never reached RX backpressure");
+        repeat(12) @(negedge core_clk);
+        framer_busy=0;
+`endif
         waits=0;
         while ((model.rx_count()!=0 || !fifo_empty) && waits<6000) begin
             @(negedge core_clk); waits=waits+1;
@@ -159,13 +187,13 @@ module tb_usb_rx_probe_after_burst;
         in_burst=0;
         $display("[RX-PROBE] burst done: FT600 dequeued %0d words, decoder consumed %0d, register writes %0d, responses %0d",
                  model.rx_rd_ptr,rx_words,writes,burst_responses);
-        if (model.rx_rd_ptr!=4*N_PKTS) fail("FT600 did not deliver the whole burst (bench/model problem)");
-        if (burst_responses!=0)        fail("a malformed packet drew a response");
+        if (model.rx_rd_ptr!=PREFIX_WORDS+4*N_PKTS) fail("FT600 did not deliver the whole burst (bench/model problem)");
+        if (burst_responses!=PREFIX_RESPONSES)        fail("a malformed packet drew a response");
 
         // The tool's batch check, then the link idle.
-        probe(4*N_PKTS+4,   "probe after the burst");
+        probe(PREFIX_WORDS+4*N_PKTS+4,   "probe after the burst");
         repeat(200) @(negedge core_clk);
-        probe(4*N_PKTS+8,   "second probe, link idle");
+        probe(PREFIX_WORDS+4*N_PKTS+8,   "second probe, link idle");
 
         if (writes!=0) fail("a malformed packet performed a register write");
         else passes=passes+1;
