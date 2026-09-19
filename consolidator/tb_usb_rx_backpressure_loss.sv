@@ -12,7 +12,7 @@
 //   * the word dequeued at the exit edge lands in usb_d_pipe after it and
 //     nothing captures it at all (READ_POST -> IDLE has no capture).
 // Every ready-low exit therefore loses two words.  A host OUT burst longer than
-// the CDC can absorb at the 66.7 -> 51.2 MHz rate difference exits that way
+// the CDC can absorb at the 66.7 -> 50 MHz rate difference exits that way
 // repeatedly.  Command framing downstream is a plain four-word count, so each
 // lost word also leaves cmd_decoder misaligned until the next reset
 // (tb_usb_rx_probe_after_burst shows that host-visible form).
@@ -27,7 +27,7 @@
 module tb_usb_rx_backpressure_loss;
     reg usb_clk=0, core_clk=0, rst_n=0;
     always #7.5 usb_clk=~usb_clk;          // 66.7 MHz FT600 clock
-    always #9.765625 core_clk=~core_clk;   // 51.2 MHz: pll_48m CLKOP (lpf FREQUENCY NET clk_48m)
+    always #10 core_clk=~core_clk;   // 50 MHz: pll_48m CLKOP (lpf FREQUENCY NET clk_48m)
 
     localparam integer N_WORDS = 240;      // 60 four-word host packets in one FT600 burst
 
@@ -47,7 +47,9 @@ module tb_usb_rx_backpressure_loss;
     ft600q_tlm model(.clk_66m(usb_clk),.rst_n(rst_n),.usb_fifo_d(usb_d),
         .usb_fifo_be(usb_be),.rxf_n(rxf_n),.txe_n(txe_n),
         .rd_n(rd_n),.wr_n(wr_n),.oe_n(oe_n));
-    ft600_245_fifo_fsm mover(.usb_fifo_clk(usb_clk),.devrst_n(rst_n),
+    wire usb_launch_clk;
+    assign #2.5 usb_launch_clk = usb_clk;
+    ft600_245_fifo_fsm #(.PHASED_OUTPUT(1)) mover(.usb_launch_clk(usb_launch_clk),.usb_fifo_clk(usb_clk),.devrst_n(rst_n),
         .usb_fifo_d(usb_d),.usb_fifo_rxf_n(rxf_n),.usb_fifo_txe_n(txe_n),
         .usb_fifo_rd_n(rd_n),.usb_fifo_wr_n(wr_n),.usb_fifo_oe_n(oe_n),
         .cmd_out_data(mover_data),.cmd_out_valid(mover_valid),.cmd_out_ready(mover_ready),

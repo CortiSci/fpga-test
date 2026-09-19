@@ -26,7 +26,7 @@
 module tb_usb_rx_probe_after_burst;
     reg usb_clk=0, core_clk=0, rst_n=0;
     always #7.5 usb_clk=~usb_clk;          // 66.7 MHz FT600 clock
-    always #9.765625 core_clk=~core_clk;   // 51.2 MHz core (pll_48m CLKOP)
+    always #10 core_clk=~core_clk;   // 50 MHz core (pll_48m CLKOP)
 
     localparam integer N_PKTS = 60;
 
@@ -46,7 +46,9 @@ module tb_usb_rx_probe_after_burst;
     ft600q_tlm model(.clk_66m(usb_clk),.rst_n(rst_n),.usb_fifo_d(usb_d),
         .usb_fifo_be(usb_be),.rxf_n(rxf_n),.txe_n(txe_n),
         .rd_n(rd_n),.wr_n(wr_n),.oe_n(oe_n));
-    ft600_245_fifo_fsm mover(.usb_fifo_clk(usb_clk),.devrst_n(rst_n),
+    wire usb_launch_clk;
+    assign #2.5 usb_launch_clk = usb_clk;
+    ft600_245_fifo_fsm #(.PHASED_OUTPUT(1)) mover(.usb_launch_clk(usb_launch_clk),.usb_fifo_clk(usb_clk),.devrst_n(rst_n),
         .usb_fifo_d(usb_d),.usb_fifo_rxf_n(rxf_n),.usb_fifo_txe_n(txe_n),
         .usb_fifo_rd_n(rd_n),.usb_fifo_wr_n(wr_n),.usb_fifo_oe_n(oe_n),
         .cmd_out_data(mover_data),.cmd_out_valid(mover_valid),.cmd_out_ready(mover_ready),

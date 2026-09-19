@@ -14,7 +14,7 @@
 //     bit1 counting, bit0 expired;
 //   * pets more often than 3 half-periods apart hold the bite off indefinitely;
 //   * a bite soft-resets every fabric register (tokens, enable mask, run bits,
-//     the watchdog's own enable) without touching the PLL, then the consolidator
+//     the watchdog's own enable) releasing USB reset independently of the PLL, then the consolidator
 //     sends ONE global fault packet {0x55AA, 0xFFFF, flags, 0x0000} with flag
 //     bit 3 (watchdog) set;
 //   * the watchdog can be armed again after the bite.
@@ -25,11 +25,8 @@
 `ifdef RUN_WD_BITE
 
 task automatic run_WD_BITE();
-    // SIM_SHORT_WD: HALF_PERIOD = 512 cycles of the pad clock.  This bench feeds
-    // the consolidator's MCLK pad with 51.2 MHz (mclk_con, PLL stub), so a
-    // half-period is 10 us here (25 us on the real 20.48 MHz oscillator) and a
-    // bite follows 4 half-periods = 40 us without a pet.
-    localparam int HALF_US   = 10;
+    // SIM_SHORT_WD: 512 pad-clock cycles at the real 20.48 MHz = 25 us.
+    localparam int HALF_US   = 25;
     localparam int PET_NS    = 15_000;                   // pet interval: < 3 half-periods
     localparam int BITE_WAIT = 4 * HALF_US * 1000 + 60_000;   // 4 half-periods + reset hold + margin
     logic [15:0] m, f, a, d;

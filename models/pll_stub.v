@@ -1,23 +1,36 @@
-// Simulation stub for pll_48m (EHXPLLJ-based PLL).
-// Asserts locked=1 after 100 ns; passes clki through as clkop at same frequency.
-// In real hardware the PLL multiplies 20.48 MHz → 51.2 MHz (CLKI_DIV=2, CLKFB_DIV=5,
-// CLKOP_DIV=9); simulation uses the MCLK source directly and relies on clk generation
-// in testbenches producing 51.2 MHz (half-period #9.766).
+// Behavioral model of the USB-referenced 50 MHz / 66 2/3 MHz PLL.
+// Nominal clocks only: this does not model analog jitter or physical lock time.
+// Loss of the reference stops modeled outputs and clears lock; reset/recovery
+// can therefore exercise the independent MCLK watchdog without a free-running
+// core silently masking the USB-clock dependency.
 `timescale 1ns/1ps
 /* verilator lint_off DECLFILENAME */
 `ifdef USE_PLL_STUB
-
 module pll_48m (
-    input  wire clki,
+    input wire clki,
+    input wire reset,
     output wire clkop,
-    output reg  locked
+    output wire usb_launch_clk,
+    output wire locked
 );
-    assign clkop = clki;
-
-    initial begin
-        locked = 1'b0;
-        #100 locked = 1'b1;
+    reg core = 0;
+    reg reference_alive = 0;
+    reg [3:0] lock_edges = 0;
+    realtime last_transition = 0;
+    always @(clki) last_transition = $realtime;
+    always #15 reference_alive = ($realtime - last_transition < 22.5);
+    always @(posedge clki or posedge reset or negedge reference_alive)
+        if (reset || !reference_alive) lock_edges <= 0;
+        else if (lock_edges < 8) lock_edges <= lock_edges + 1'b1;
+    assign locked = !reset && reference_alive && (lock_edges == 8);
+    initial forever begin
+        wait (locked);
+        #10 core = ~core;
     end
+    wire shifted_reference;
+    assign #2.5 shifted_reference = clki;
+    assign clkop = locked && core;
+    assign usb_launch_clk = locked && shifted_reference;
 endmodule
 /* verilator lint_on DECLFILENAME */
 

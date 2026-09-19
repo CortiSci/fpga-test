@@ -15,20 +15,22 @@ module tb_top;
     // =========================================================================
     // Clock & reset
     // =========================================================================
-    logic mclk_con;      // 51.2 MHz → Consolidator PLL input
+    logic mclk_con;      // 20.48 MHz independent watchdog oscillator
     logic tail_mclk;     // 20.48 MHz → Tail FPGA MCLK_20_48M
     logic usb_fifo_clk;  // 66 MHz source-synchronous from FT600Q
     logic devrst_n;
     logic faultn_tb;
+    wire usb_reset_n;
 
     initial mclk_con = 1'b0;
-    always #9.766 mclk_con = ~mclk_con;
+    always #24.4140625 mclk_con = ~mclk_con;
 
     initial tail_mclk = 1'b0;
     always #24.414 tail_mclk = ~tail_mclk;
 
     initial usb_fifo_clk = 1'b0;
-    always #7.576 usb_fifo_clk = ~usb_fifo_clk;
+    // FT600 reset may stop its clock. Recovery must use the independent MCLK.
+    always #7.5 usb_fifo_clk = usb_reset_n ? ~usb_fifo_clk : 1'b0;
 
     initial begin
         devrst_n  = 1'b0;
@@ -47,7 +49,6 @@ module tb_top;
     wire        usb_fifo_wr_n;
     wire        usb_fifo_oe_n;
     wire        usb_fifo_siwu_n;
-    wire        usb_reset_n;
     wire [1:0]  usb_gpio;
 
     // =========================================================================
@@ -103,7 +104,7 @@ module tb_top;
     consolidator_v2_top dut_con (
         .MCLK_20_48M_FPGA  (mclk_con),
         .DEVRST_N          (devrst_n),
-        .PROGRAMN          (),
+        .PROGRAMN          (1'b1),
 
         .LEDn_0            (),
         .FAULTN            (faultn_board),
@@ -252,7 +253,7 @@ module tb_top;
     // =========================================================================
     ft600q_tlm #(.TELEM_FRAME_LEN(4105)) u_ft600q (
         .clk_66m     (usb_fifo_clk),
-        .rst_n       (devrst_n),
+        .rst_n       (usb_reset_n),
         .usb_fifo_d  (usb_fifo_d),
         .usb_fifo_be (usb_fifo_be),
         .rxf_n       (usb_fifo_rxf_n),
@@ -272,7 +273,7 @@ module tb_top;
     genvar bfm_ch;
     generate
         for (bfm_ch = 0; bfm_ch < 4; bfm_ch = bfm_ch + 1) begin : spi_bfm
-            spi_master_bfm #(.CLK_PERIOD_NS(19.531)) u_bfm (
+            spi_master_bfm #(.CLK_PERIOD_NS(20.000)) u_bfm (
                 .sclk (bfm_sclk_w[bfm_ch]),
                 .mosi (bfm_mosi_w[bfm_ch]),
                 .miso (spi_miso_t2c[bfm_ch]),

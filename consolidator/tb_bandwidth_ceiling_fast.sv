@@ -5,8 +5,8 @@
 // there is no 2048-word FT600 credit or SPI/ASIC setup to simulate.
 module tb_bandwidth_ceiling_fast;
     reg clk=0, usb_clk=0, rst_n=0, start=0;
-    always #9.765625 clk=~clk;
-    always #7.575758 usb_clk=~usb_clk;
+    always #10 clk=~clk;
+    always #7.5 usb_clk=~usb_clk;
     reg [3:0] live=4'hb;
     reg [3:0] wd_valid=0;
     reg [15:0] wd0=0, wd1=0, wd2=0, wd3=0;
@@ -58,21 +58,23 @@ module tb_bandwidth_ceiling_fast;
         .rd_clk(usb_clk),.rd_rst_n(rst_n),.rd_data(usb_data),.rd_en(rd_en),
         .rd_empty(cdc_empty),.rd_level(rd_level));
 
-    // All live legs supply one word every 20 acquisition clocks. Word identity
+    // Preserve the physical 2.56 Mword/s source at a 50 MHz fabric clock:
+    // 32 words per 625 cycles. Word identity
     // encodes the sequence and leg, so dropped/repeated/interleaved words cannot
     // accidentally pass a constant-pattern comparison.
     always @(negedge clk) begin
         if (!rst_n) begin source_words=0; divider=0; wd_valid=0; epoch=0; end
         else begin
             wd_valid=0; epoch=0;
-            if (divider==19) begin
-                divider=0;
+            divider=divider+32;
+            if (divider>=625) begin
+                divider=divider-625;
                 wd0=source_words; wd1=source_words ^ 16'h4000;
                 wd2=source_words ^ 16'h8000; wd3=source_words ^ 16'hc000;
                 wd_valid=live;
                 epoch=(source_words % 1024)==0;
                 source_words=source_words+1;
-            end else divider=divider+1;
+            end
         end
     end
     // No initial host credit: exercise the same steady deficit immediately.
@@ -149,7 +151,7 @@ module tb_bandwidth_ceiling_fast;
             wait(frames>=3);
             check(errors==0,"unlimited host: complete ordered frames, phase flags and CRC");
             initial_gaps=gaps;
-            drain_rate=152;
+            drain_rate=151;
             wait(frames>=15);
             check(errors==0,"2% deficit: every delivered frame intact, dead leg flagged, CRC correct");
             check(gaps>initial_gaps,"2% deficit: omitted input frames exposed by counter gaps");
