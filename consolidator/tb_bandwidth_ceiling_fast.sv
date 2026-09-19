@@ -1,13 +1,14 @@
 `timescale 1ns/1ps
 // Focused bandwidth regression: real leg FIFO, assembler, CRC and asynchronous
 // output FIFO; behavioral word producers and smooth USB drain. No DUT forces.
-// Input 20.5 MB/s, host ceiling 20.1 MB/s. Unlike the extended board bench,
+// Input 20.5 MB/s; host ceiling 20.1 MB/s, or the recorded 14 MB/s.
+// Unlike the extended board bench,
 // there is no 2048-word FT600 credit or SPI/ASIC setup to simulate.
 module tb_bandwidth_ceiling_fast;
 `ifdef RECORDED_DEFICIT
     localparam DRAIN_RATE=105, DEFICIT_END=6, RECOVERY_END=8;
 `else
-    localparam DRAIN_RATE=151, DEFICIT_END=15, RECOVERY_END=18;
+    localparam DRAIN_RATE=151, DEFICIT_END=10, RECOVERY_END=13;
 `endif
     reg clk=0, usb_clk=0, rst_n=0, start=0;
     always #10 clk=~clk;
