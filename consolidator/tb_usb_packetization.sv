@@ -1,5 +1,5 @@
 `timescale 1ns/1ps
-// Manual failing reproduction, not registered in CI until a fix is validated.
+// Regression for the reproduced partial-packet pauses, registered in CI.
 // Real leg FIFO, telemetry engine, CRC, TX CDC and phased USB mover. Physical
 // 50/66.667 MHz clocks, normal 2.56 Mword/s legs, LEG7 inactive. No host limit.
 module tb_usb_packetization;
