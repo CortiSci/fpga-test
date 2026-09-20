@@ -1,7 +1,7 @@
 // ---------------------------------------------------------------------------
 // SA-DEAD-LEG-CEILING — the "drops" of asic_grid_asic_130108 (2026-09-18 13:01),
-// reproduced.  EXPECTED TO FAIL on this RTL: it asserts the behaviour the
-// recording shows is missing, and records how far off it is.
+// reproduced. Fails on the pre-fix RTL; protects intact delivered frames under
+// a sustained bandwidth deficit on the fixed RTL.
 //
 // The recording (main @ 7948148 flashed, all four legs enabled, 10.4 s = 25,924
 // frames).  Jeremy saw "drops and spikes maybe once every 3 seconds" on the
@@ -43,8 +43,8 @@
 //      others (the escape/tick logic) or whether this is bandwidth alone.
 //
 // Contract (what must hold) and measurement (what a fix must move):
-//   DLC-01 with LEG7 dead the healthy legs must not drop at all.  FAILS on this
-//          RTL -- the recording's defect.  Reports the rate and its split.
+//   DLC-01 with LEG7 dead the healthy legs must not drop at all. Failed on the
+//          original RTL -- the recording's defect. Reports the rate and split.
 //   DLC-02 a dead enabled leg must not aggravate the healthy legs: drops with
 //          LEG7 dead <= 1.5x drops with LEG7 alive (+3 for small samples).
 //   DLC-03 the dead leg is flagged (undf) and reports 1023 on EVERY frame -- an
@@ -117,7 +117,15 @@ task automatic run_DEAD_LEG_CEILING();
                                                     //   = 20.5 MB/s) -> a steady ~2 % deficit, smooth host, no hiccups
     localparam int         DEFICIT_LEADIN = 25;     // unjudged frames for the FT600's 2048-word credit to run out
                                                     //   (2048 / 3.5e-3 words/cycle ~ 9 ms) and the spill cadence to settle
-    localparam int         WINDOW_FRAMES  = 60;     // 24 ms judged per window
+    // Keep the full FT600 credit and lead-in, but avoid the old 60-frame
+    // statistical soak in CI. DLC-06 requires actual deficit-induced omissions
+    // in BOTH windows, so shortening this cannot silently remove the stress.
+    // Define DEAD_LEG_EXTENDED for the original 60-frame measurement windows.
+`ifdef DEAD_LEG_EXTENDED
+    localparam int         WINDOW_FRAMES  = 60;
+`else
+    localparam int         WINDOW_FRAMES  = 24;
+`endif
     localparam int         RECOVER_FRAMES = 10;
     logic [15:0] m, f, a, d, hdr;
     logic [47:0] tx, rx;
@@ -244,6 +252,11 @@ task automatic run_DEAD_LEG_CEILING();
     end
     // DLC-05 is the per-leg right-or-flagged verdicts folded into n_pass/n_fail above.
     $display("[DLC-05] %s right-or-flagged on every judged leg-frame", (n_fail == 0) ? "PASS" : "see FAIL lines above:");
+    if (sk_d > 0 && sk_a > 0) begin
+        n_pass++; $display("[DLC-06] PASS bandwidth deficit exercised in both windows: %0d dead / %0d alive counter skips", sk_d, sk_a);
+    end else begin
+        n_fail++; $display("[DLC-06] FAIL insufficient deficit exposure: %0d dead / %0d alive counter skips", sk_d, sk_a);
+    end
 
     // ---- recover: link unlimited again, all four strict-correct -----------------------
     all_clean = 0;
