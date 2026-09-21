@@ -10,14 +10,8 @@ the suite's result contract (`RESULTS: N passed, M failed` / `STATUS: PASS|FAIL`
 Windows only: the FTD3XX shim and the test app are not built elsewhere; the
 suite reports SKIP there.
 
-Known flake (2026-09-11): BL-11 ("BIST counter contiguous (0 words...)") and
-BL-12 ("reconnect for watchdog test") — both the first step after the test's
-own pipe close/re-open — fail in roughly one run in four; the race is between
-the test app's reconnect and the emulator re-listening, not in the model under
-test (it was present before the transport port, see CLAUDE.md).  Until it is
-fixed the target retries ONCE, only when every failure is one of those two
-checks, and says so loudly: the first transcript is kept in the log and the
-summary line carries "(flaky: retried once)".  Any other failure is final.
+No automatic retry: preserve the first failing result. Cancellation framing
+in the shim is now retained across stop/start; a retry must not conceal regression.
 
     python fpga-test/emulator/run_ionm_test.py            # default: --emulator=sw
     python fpga-test/emulator/run_ionm_test.py --emulator=rtl
@@ -37,7 +31,6 @@ DUT_ROOT = Path(os.environ.get("IONM_DUT_ROOT", TEST_ROOT.parent))
 RELEASE = DUT_ROOT / "Software Emulator" / "build" / "test_app" / "Release"
 EXE = RELEASE / "ionm_test.exe"
 
-RETRYABLE = ("BL-11:", "BL-12: reconnect")
 SUMMARY_RE = re.compile(r"^\s*PASS:\s*(\d+)\s+FAIL:\s*(\d+)\s*$", re.M)
 
 
@@ -74,18 +67,10 @@ def main() -> int:
     t0 = time.time()
     rc, n_pass, n_fail, fails, out = run_once(args, 600)
     print(out)
-    retried = False
-    if rc != 0 and fails and all(any(f.startswith("[FAIL] " + k) for k in RETRYABLE) for f in fails):
-        print("\n=== first run failed only on the known reconnect-race checks — retrying once ===")
-        for f in fails:
-            print("   first run:", f)
-        retried = True
-        rc, n_pass, n_fail, fails, out = run_once(args, 600)
-        print(out)
     secs = time.time() - t0
     for f in fails:
         print("FAIL:", f)
-    note = "  (flaky: retried once — reconnect race BL-11/BL-12, see run_ionm_test.py)" if retried else ""
+    note = ""
     print(f"ionm_test: {n_pass} passed, {n_fail} failed in {secs:.0f} s{note}")
     print(f"RESULTS: {n_pass} passed, {n_fail} failed")
     print(f"STATUS: {'PASS' if rc == 0 and n_fail == 0 else 'FAIL'}")

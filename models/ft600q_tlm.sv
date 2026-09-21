@@ -95,14 +95,13 @@ module ft600q_tlm #(
     int        telem_wr_ptr = 0;
     int        telem_rd_ptr = 0;
 
-`ifdef ICARUS
+    // Shared side results also serve the typed reader and native count words.
     // C-05: Icarus cannot pass unpacked arrays as output task parameters.
     // Module-level result buffers; callers read via hierarchical reference.
     reg [15:0] v3_data  [0:4095];
     reg [15:0] v3_phase [0:3];
     reg [15:0] v3_crc   [0:1];
     reg [15:0] v3_count_lo, v3_count_hi;
-`endif
 
     // -------------------------------------------------------------------------
     // TX frame demux state

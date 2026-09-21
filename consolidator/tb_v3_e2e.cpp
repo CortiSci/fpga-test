@@ -46,7 +46,7 @@ int main(int argc, char** argv) {
     switch (mode) {
         case 'o': start_en = 0x1; desc = "LEG5 only"; break;
         case 'k': start_en = 0xD; late_leg = 1; late_at = 35000; desc = "LEG6 late"; break;
-        case 'd': die_leg = 2; die_at = 50000; desc = "LEG7 dies"; break;
+        case 'd': die_leg = 2; die_at = 90000; desc = "LEG7 dies"; break;
         case 's': stalls = true; desc = "25% TX stalls"; break;
         default: break;
     }
@@ -123,9 +123,11 @@ int main(int argc, char** argv) {
         for (int leg = 0; leg < 4; ++leg) {
             const uint16_t word = frame[4099 + leg];
             const int phase = word & 0x3FF;
-            const bool fault = (word & 0x7000) != 0;
+            // Overflow is sticky history, unlike per-frame parity/underrun.
+            // Continue checking exact recovered samples after re-anchoring.
+            const bool fault = (word & 0x5000) != 0;
             if ((word & 0x8C00) || (phase > 63 && phase != 1023)) ++bad;
-            if (fault) ++flagged[leg];
+            if (word & 0x7000) ++flagged[leg];
             if (phase == 1023) ++absent[leg];
             else if (!fault) { ++clean[leg]; last_clean[leg] = nframes; }
             for (int tick = 0; tick < 1024; ++tick) {
