@@ -1,8 +1,5 @@
-# Extracted-board four-ASIC/four-Tail ACED integration runner.
-set USE_PLL_STUB 1
-set SIM_DEFINES "+define+RUN_ACED+USE_PLL_STUB"
-if {!$USE_PLL_STUB} { set SIM_DEFINES "+define+RUN_ACED" }
-set SIM_TB_FILE "tb_board.sv"
-set SIM_TOP "tb_board"
-set SIM_LOG "sim_board_aced.log"
-do "C:/cortisci/IONM-A/IONM-A-FPGA/consolidator_v2/scripts/sim_aced.do"
+# Current-source Questa GUI entry point: consolidator_board_stream.
+# Load with do <this-file>; then run -all. See tools/ci/README.md.
+set registry_repo [file normalize [file join [file dirname [status file]] .. .. ..]]
+source [file join $registry_repo tools ci questa_launch.do]
+launch_registry_target $registry_repo consolidator_board_stream
