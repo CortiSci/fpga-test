@@ -8,7 +8,9 @@ module tb_bandwidth_ceiling_fast;
 `ifdef RECORDED_DEFICIT
     localparam DRAIN_RATE=105, DEFICIT_END=6, RECOVERY_END=8;
 `else
-    localparam DRAIN_RATE=151, DEFICIT_END=10, RECOVERY_END=13;
+    // The 512-word admission watermark absorbs one more frame's deficit;
+    // observe its eventual counter gap before restoring the unlimited sink.
+    localparam DRAIN_RATE=151, DEFICIT_END=11, RECOVERY_END=13;
 `endif
     reg clk=0, usb_clk=0, rst_n=0, start=0;
     always #10 clk=~clk;

@@ -11,6 +11,12 @@ module tb_usb_packetization;
     reg [15:0] wd0=0, wd1=0, wd2=0, wd3=0;
     integer source_words=0, divider=0;
     reg epoch=0;
+    // Exercise the problematic packet phase without simulating 32 sweeps.
+    // Queue a 240-word prefix at the public TX FIFO input before acquisition;
+    // USB packet boundaries need not coincide with telemetry frame boundaries.
+    localparam PREFIX_WORDS=240;
+    reg prefix_valid=0, source_enabled=0;
+    integer prefix_sent=0, prefix_received=0;
     wire rd_en,wr_n,rd_n,oe_n,pop;
     wire [28:0] frame_count=source_words/1024;
     wire tick_req,tick_valid;
@@ -48,7 +54,9 @@ module tb_usb_packetization;
               .data_in(crc_data),.crc_out(crc_result),.crc_valid(crc_done));
     assign tx_ready=~cdc_almost;
     telem_tx_fifo output_fifo(
-        .wr_clk(clk),.wr_rst_n(rst_n),.wr_data(tx_data),.wr_en(tx_valid && !cdc_full),
+        .wr_clk(clk),.wr_rst_n(rst_n),
+        .wr_data(prefix_valid ? (16'h8000 + prefix_sent[15:0]) : tx_data),
+        .wr_en((prefix_valid || tx_valid) && !cdc_full),
         .wr_full(cdc_full),.wr_almost_full(cdc_almost),
         .wr_half_full(cdc_half),
         .rd_clk(usb_clk),.rd_rst_n(rst_n),.rd_data(fifo_data),.rd_en(pop && !cdc_empty),
@@ -60,7 +68,7 @@ module tb_usb_packetization;
     // accidentally pass a constant-pattern comparison.
     always @(negedge clk) begin
         if (!rst_n) begin source_words=0; divider=0; wd_valid=0; epoch=0; end
-        else begin
+        else if (source_enabled) begin
             wd_valid=0; epoch=0;
             divider=divider+32;
             if (divider>=625) begin
@@ -73,6 +81,8 @@ module tb_usb_packetization;
             end
         end
     end
+    always @(posedge clk) if (rst_n && prefix_valid && !cdc_full)
+        prefix_sent <= prefix_sent+1;
     wire launch_clk; assign #2.5 launch_clk=usb_clk;
     reg [1:0] busy_sync=0;
     always @(posedge usb_clk or negedge rst_n)
@@ -103,8 +113,8 @@ module tb_usb_packetization;
                 if(burst_words%256!=0) begin
                     if(midframe_short+tail_short<6)
                         $display("[PACKET] partial bytes=%0d end_frame_word=%0d source_idle=%b source_words=%0d time_ns=%0f",
-                            2*burst_words,wire_words%4105,~busy_sync[1],source_words,$realtime);
-                    if(wire_words%4105!=0) midframe_short++;
+                            2*burst_words,(wire_words-PREFIX_WORDS)%4105,~busy_sync[1],source_words,$realtime);
+                    if((wire_words-PREFIX_WORDS)%4105!=0) midframe_short++;
                     else tail_short++;
                 end
             end
@@ -125,6 +135,10 @@ module tb_usb_packetization;
     endfunction
     // Score only public USB words, not internal discard/state signals.
     always @(posedge usb_clk) if (rst_n && rd_en) begin
+        if (prefix_received<PREFIX_WORDS) begin
+            if (usb_data !== (16'h8000 + prefix_received[15:0])) errors++;
+            prefix_received++;
+        end else begin
         if (pos==0) begin
             checksum=32'hffffffff;
             if (usb_data!==16'h0001) errors=errors+1;
@@ -159,6 +173,7 @@ module tb_usb_packetization;
         if (pos==4104 && usb_data!==(~checksum[15:0])) errors=errors+1;
         if (pos==4104) begin frames=frames+1; pos=0; end
         else pos=pos+1;
+        end
     end
     task automatic check(input bit ok,input string label);
         if (ok) begin passes++; $display("[PACKET] PASS %s",label); end
@@ -168,7 +183,9 @@ module tb_usb_packetization;
     initial begin
         for(k=0;k<=16384;k++) histogram[k]=0;
         repeat(5) @(negedge clk);
-        rst_n=1; start=1;
+        rst_n=1; prefix_valid=1;
+        wait(prefix_sent==PREFIX_WORDS);
+        @(negedge clk); prefix_valid=0; source_enabled=1; start=1;
         @(negedge clk); start=0;
         wait(frames>=8);
         @(negedge usb_clk);
@@ -182,7 +199,7 @@ module tb_usb_packetization;
             $display("[PACKET] histogram bytes=%0d count=%0d",2*k,histogram[k]);
         $display("RESULTS: %0d passed, %0d failed",passes,failures);
         $display("STATUS: %s",failures==0 ? "PASS" : "FAIL");
-        if(failures) $fatal(1,"short-packet reproduction");
+        if(failures) $fatal(1,"USB packetization/integrity regression");
         $finish;
     end
     initial begin #5000000; $fatal(1,"packet audit timeout"); end
