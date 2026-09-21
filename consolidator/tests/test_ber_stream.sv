@@ -85,7 +85,11 @@ endtask
 
 task automatic run_BER_STREAM();
     logic [15:0] m, f, a, d, hdr;
+`ifdef ICARUS
     logic [47:0] tx, rx;
+`else
+    logic [7:0] tx[0:5], rx[0:5];
+`endif
     int          n_flush;
     longint      bits_all;
     int          errs_all, errs_before, frame_cnt_first, frame_cnt_last;
@@ -100,19 +104,34 @@ task automatic run_BER_STREAM();
     tb_top.u_ft600q.wait_response_frame_typed(m, f, a, d);
     #200;
     for (int ch = 0; ch < 4; ch++) begin
-        tx = 48'h01_11_00_00_00_00; spi_cfg_xact(ch[1:0], tx, 3'd2, rx);   // CTRL: RO_RSTn + MCLK_EN
-        tx = 48'h06_01_00_00_00_00; spi_cfg_xact(ch[1:0], tx, 3'd2, rx);   // SELF_TEST = 1
-        tx = 48'h02_01_00_00_00_00; spi_cfg_xact(ch[1:0], tx, 3'd2, rx);   // TELEM_EN  = 1
+`ifdef ICARUS
+        tx = 48'h01_11_00_00_00_00;
+`else
+        tx = '{8'h01, 8'h11, 8'h00, 8'h00, 8'h00, 8'h00};
+`endif
+        spi_cfg_xact(ch[1:0], tx, 3'd2, rx);   // CTRL: RO_RSTn + MCLK_EN
+`ifdef ICARUS
+        tx = 48'h06_01_00_00_00_00;
+`else
+        tx = '{8'h06, 8'h01, 8'h00, 8'h00, 8'h00, 8'h00};
+`endif
+        spi_cfg_xact(ch[1:0], tx, 3'd2, rx);   // SELF_TEST = 1
+`ifdef ICARUS
+        tx = 48'h02_01_00_00_00_00;
+`else
+        tx = '{8'h02, 8'h01, 8'h00, 8'h00, 8'h00, 8'h00};
+`endif
+        spi_cfg_xact(ch[1:0], tx, 3'd2, rx);   // TELEM_EN = 1
     end
     tb_top.u_ft600q.send_command_frame(CMD_MAGIC, flags_wr(), REG_SPI_CLK_DIV, 16'h0000);
     tb_top.u_ft600q.wait_response_frame_typed(m, f, a, d);
     tb_top.u_ft600q.send_command_frame(CMD_MAGIC, flags_wr(), 16'h0140, 16'h000F);   // ACQ_ALL_RUN
     tb_top.u_ft600q.wait_response_frame_typed(m, f, a, d);
-    tb_top.u_ft600q.flush_tx_capture(n_flush);
+    tb_top.u_ft600q.discard_tx_capture(n_flush);
 
     // Two start-up frames are discarded, as the BIST bench does: the self-test
     // source is enabled before the arm, so the first frames can straddle it.
-    for (int i = 0; i < 2; i++) tb_top.u_ft600q.wait_telemetry_frame_v3(hdr);
+    for (int i = 0; i < 2; i++) tb_top.u_ft600q.wait_telemetry_frame_v3_typed(hdr);
 
     for (int ch = 0; ch < 4; ch++) begin
         bers_anchored[ch] = 0; bers_bits[ch] = 0; bers_errs[ch] = 0;
@@ -120,7 +139,7 @@ task automatic run_BER_STREAM();
     end
     frame_cnt_first = -1; frame_cnt_last = -1;
     for (int i = 0; i < BERS_FRAMES; i++) begin
-        tb_top.u_ft600q.wait_telemetry_frame_v3(hdr);
+        tb_top.u_ft600q.wait_telemetry_frame_v3_typed(hdr);
         for (int j = 0; j < 4096; j++) bers_data[j]  = tb_top.u_ft600q.v3_data[j];
         for (int j = 0; j < 4;    j++) bers_phase[j] = tb_top.u_ft600q.v3_phase[j];
         if (frame_cnt_first < 0) frame_cnt_first = tb_top.u_ft600q.v3_count_lo;

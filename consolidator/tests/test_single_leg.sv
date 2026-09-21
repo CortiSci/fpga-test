@@ -39,11 +39,11 @@ task automatic run_SA_SINGLE_LEG_ACED();
     tb_top.u_ft600q.wait_response_frame_typed(m, f, a, d);
     tb_top.u_ft600q.send_command_frame(CMD_MAGIC, flags_wr(), REG_ACQ_ALL_RUN, 16'h0001);
     tb_top.u_ft600q.wait_response_frame_typed(m, f, a, d);
-    tb_top.u_ft600q.flush_tx_capture(n_flush);
+    tb_top.u_ft600q.discard_tx_capture(n_flush);
 
     // Discard the arm/frame-sync startup frame, then verify one complete V3 frame.
-    tb_top.u_ft600q.wait_telemetry_frame_v3(hdr);
-    tb_top.u_ft600q.wait_telemetry_frame_v3(hdr);
+    tb_top.u_ft600q.wait_telemetry_frame_v3_typed(hdr);
+    tb_top.u_ft600q.wait_telemetry_frame_v3_typed(hdr);
     for (i = 0; i < 4096; i++) data[i] = tb_top.u_ft600q.v3_data[i];
     for (i = 0; i < 4; i++) phase[i] = tb_top.u_ft600q.v3_phase[i];
     for (i = 0; i < 2; i++) crcw[i] = tb_top.u_ft600q.v3_crc[i];

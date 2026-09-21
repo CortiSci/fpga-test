@@ -89,12 +89,12 @@ task automatic run_SA_USB_MICROSTALL();
     #200;
     for (ch = 0; ch < 4; ch++) begin
         if (!MASK[ch]) continue;
-        tx = 48'h01_11_00_00_00_00; spi_cfg_xact(ch[1:0], tx, 3'd2, rx);   // CTRL: RO_RSTn + MCLK_EN
-        tx = 48'h02_01_00_00_00_00; spi_cfg_xact(ch[1:0], tx, 3'd2, rx);   // TELEM_EN normal
+        tx = 48'h01_11_00_00_00_00; spi_cfg_xact_packed(ch[1:0], tx, 3'd2, rx);   // CTRL: RO_RSTn + MCLK_EN
+        tx = 48'h02_01_00_00_00_00; spi_cfg_xact_packed(ch[1:0], tx, 3'd2, rx);   // TELEM_EN normal
     end
     tb_top.u_ft600q.send_command_frame(CMD_MAGIC, flags_wr(), 16'h0140, {12'h0, MASK});   // ACQ_ALL_RUN
     tb_top.u_ft600q.wait_response_frame_typed(m, f, a, d);
-    tb_top.u_ft600q.flush_tx_capture(n_flush);
+    tb_top.u_ft600q.discard_tx_capture(n_flush);
 
     // ---- settle: an all-clean frame ------------------------------------------
     hx_grab_frame(hdr);

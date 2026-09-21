@@ -160,6 +160,23 @@ task automatic spi_cfg_xact(
 endtask
 `endif  // !ICARUS (spi_cfg_xact)
 
+// Packed callers use the same transaction semantics on both simulator lanes.
+task automatic spi_cfg_xact_packed(
+    input logic [1:0] ch_sel,
+    input logic [47:0] tx,
+    input logic [2:0] n_bytes,
+    output logic [47:0] rx
+);
+`ifdef ICARUS
+    spi_cfg_xact(ch_sel, tx, n_bytes, rx);
+`else
+    logic [7:0] tx_array[0:5], rx_array[0:5];
+    for (int i = 0; i < 6; i++) tx_array[i] = tx[47 - 8*i -: 8];
+    spi_cfg_xact(ch_sel, tx_array, n_bytes, rx_array);
+    for (int i = 0; i < 6; i++) rx[47 - 8*i -: 8] = rx_array[i];
+`endif
+endtask
+
 // CU-02: Fault monitor falling-edge detect → fault_latch set
 // cmd_decoder emits a spontaneous interrupt frame when fault_trig fires;
 // consume it before reading the register.

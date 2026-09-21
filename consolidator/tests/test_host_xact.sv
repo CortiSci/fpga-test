@@ -101,18 +101,11 @@ endfunction
 // Capture one V3 frame into hx_data + hx_phase (module scope, see C-05 note).
 task automatic hx_grab_frame(output logic [15:0] hdr_o);
     int i;
-`ifdef ICARUS
     // TYPED reader: this bench issues USB commands while streaming, so the raw
     // capture interleaves 4-word responses; the untyped reader desyncs on them.
     tb_top.u_ft600q.wait_telemetry_frame_v3_typed(hdr_o);
     for (i = 0; i < 4096; i++) hx_data[i]  = tb_top.u_ft600q.v3_data[i];
     for (i = 0; i < 4;    i++) hx_phase[i] = tb_top.u_ft600q.v3_phase[i];
-`else
-    begin
-        logic [15:0] cw [0:1];
-        tb_top.u_ft600q.wait_telemetry_frame_v3(hdr_o, hx_data, hx_phase, cw);
-    end
-`endif
 endtask
 
 // Judge one leg of the frame in hx_data against the host contract.

@@ -21,6 +21,7 @@ module tb_top;
     logic devrst_n;
     logic faultn_tb;
     wire usb_reset_n;
+    logic usb_reference_enabled = 1'b1;
 
     initial mclk_con = 1'b0;
     always #24.4140625 mclk_con = ~mclk_con;
@@ -30,7 +31,7 @@ module tb_top;
 
     initial usb_fifo_clk = 1'b0;
     // FT600 reset may stop its clock. Recovery must use the independent MCLK.
-    always #7.5 usb_fifo_clk = usb_reset_n ? ~usb_fifo_clk : 1'b0;
+    always #7.5 usb_fifo_clk = (usb_reset_n && usb_reference_enabled) ? ~usb_fifo_clk : 1'b0;
 
     initial begin
         devrst_n  = 1'b0;
@@ -298,6 +299,7 @@ module tb_top;
     `include "tests/test_dead_leg_ceiling.sv"
     `include "tests/test_watchdog.sv"
     `include "tests/test_ber_stream.sv"
+    `include "tests/test_pll_loss.sv"
 
     // =========================================================================
     // Main test sequence (default — runs when no other define selects a suite)
@@ -314,6 +316,7 @@ module tb_top;
 `ifndef RUN_HOST_XACT
 `ifndef RUN_WD_BITE
 `ifndef RUN_BER_STREAM
+`ifndef RUN_PLL_LOSS
     initial begin
         @(posedge devrst_n);
         #500;
@@ -357,6 +360,7 @@ module tb_top;
         #10_000_000;  // 10 ms — SM + CU + CV + SP well within budget
         $fatal(1, "[TB] Simulation timeout: V2 tests did not finish within 10 ms");
     end
+`endif  // !RUN_PLL_LOSS
 `endif  // !RUN_BER_STREAM
 `endif  // !RUN_WD_BITE
 `endif  // !RUN_HOST_XACT

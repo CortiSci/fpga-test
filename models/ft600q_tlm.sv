@@ -595,6 +595,16 @@ module ft600q_tlm #(
         ctrl_rd_ptr = ctrl_rd_ptr + 4;
     endtask
 
+    // Discard helper for callers that do not consume the legacy raw snapshot.
+    task automatic discard_tx_capture(output int n);
+`ifdef ICARUS
+        flush_tx_capture(n);
+`else
+        logic [15:0] words[0:4095];
+        flush_tx_capture(words, n);
+`endif
+    endtask
+
     // Block until one complete V3 telemetry frame is available in the typed
     // telemetry capture.  Unlike the legacy flat-capture helper, this remains
     // aligned when a deferred command/fault response follows the prior frame.

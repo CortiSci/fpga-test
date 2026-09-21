@@ -155,12 +155,12 @@ task automatic run_DEAD_LEG_CEILING();
     for (ch = 0; ch < 4; ch++) begin
         if (ch == DEAD_CH) tx = 48'h01_01_00_00_00_00;   // CTRL: RO_RSTn=1, MCLK_EN=0 -> no RO1_CLK: the dead leg
         else               tx = 48'h01_11_00_00_00_00;   // CTRL: RO_RSTn + MCLK_EN
-        spi_cfg_xact(ch[1:0], tx, 3'd2, rx);
-        tx = 48'h02_01_00_00_00_00; spi_cfg_xact(ch[1:0], tx, 3'd2, rx);   // TELEM_EN normal (LEG7 too, as recorded)
+        spi_cfg_xact_packed(ch[1:0], tx, 3'd2, rx);
+        tx = 48'h02_01_00_00_00_00; spi_cfg_xact_packed(ch[1:0], tx, 3'd2, rx);   // TELEM_EN normal (LEG7 too, as recorded)
     end
     tb_top.u_ft600q.send_command_frame(CMD_MAGIC, flags_wr(), 16'h0140, {12'h0, MASK});   // ACQ_ALL_RUN
     tb_top.u_ft600q.wait_response_frame_typed(m, f, a, d);
-    tb_top.u_ft600q.flush_tx_capture(n_flush);
+    tb_top.u_ft600q.discard_tx_capture(n_flush);
 
     // ---- settle: the healthy legs all-clean, LEG7 un-anchored ---------------
     hx_grab_frame(hdr);
