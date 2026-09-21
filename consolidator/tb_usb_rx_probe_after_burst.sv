@@ -69,7 +69,7 @@ module tb_usb_rx_probe_after_burst;
     cmd_decoder dut(.clk(core_clk),.rst_n(rst_n),.rx_data(rx_data),.rx_valid(rx_valid),
         .rx_ready(rx_ready),.tx_data(tx_data),.tx_valid(tx_valid),.tx_ready(tx_ready),
         .reg_addr(reg_addr),.reg_wdata(reg_wdata),.reg_we(reg_we),.reg_rdata(reg_rdata),
-        .fault_src(5'b0),.fault_frame_sent(fault_frame_sent),.fault_flags_sent(fault_flags_sent),
+        .parity_events(4'b0),.fault_src(5'b0),.fault_frame_sent(fault_frame_sent),.fault_flags_sent(fault_flags_sent),
         .framer_busy(framer_busy),.ctrl_early(ctrl_early));
 
     integer failures=0, passes=0, writes=0, responses=0, resp_idx=0, burst_responses=0;
