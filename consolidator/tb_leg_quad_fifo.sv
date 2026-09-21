@@ -21,6 +21,8 @@
 //   TC-QF-03  flush ON the capture cycle: count 0 afterwards, next word readable
 //   TC-QF-04  17th word into a full leg: one ovf_pulse, sticky fifo_ovf, word dropped
 //   TC-QF-05  flush keeps the sticky fifo_ovf, clears the count
+//   TC-QF-06  full legs accept an arrival while their read is in flight;
+//             the existing pending requests preserve all 17 words in order
 //
 // Compiles under Icarus (C-05/C-10 respected: no unpacked task ports, decls first).
 // ============================================================================
@@ -168,6 +170,47 @@ module tb_leg_quad_fifo;
         push0(16'h9999);
         tick(got, got_undf);
         check(got == 16'h9999 && !got_undf, "TC-QF-05 first word after the flush is the head");
+
+        // TC-QF-06: T03 restart failure. All four RAM queues are full. The
+        // next input arrives on LEG6's read/capture edge, two clocks before
+        // LEG8's capture. It must wait in the existing pending request, not
+        // be dropped merely because the RAM count is still 16. The input
+        // remains stable for a full serial-word interval (>=18 clocks).
+        @(posedge clk); #1; ch_local_rst=4'hf;
+        @(posedge clk); #1; ch_local_rst=0;
+        for(i=0;i<16;i=i+1) begin
+            @(posedge clk); #1;
+            wd0=16'h1000+i; wd1=16'h1100+i;
+            wd2=16'h1200+i; wd3=16'h1300+i;
+            wd_valid=4'hf;
+            @(posedge clk); #1; wd_valid=0;
+            repeat(18) @(posedge clk);
+        end
+        #1; check(fifo_full==4'hf && fifo_ovf==0,"TC-QF-06 all four queues full without loss");
+        @(posedge clk); #1; tick_req=1;
+        @(posedge clk); #1; tick_req=0; // R_IDLE -> R_ISSUE1
+        @(posedge clk); #1;            // R_ISSUE1 -> R_CAP0
+        wd0=16'h2000; wd1=16'h2100; wd2=16'h2200; wd3=16'h2300;
+        @(posedge clk); #1; wd_valid=4'hf; // input sampled with R_CAP1
+        @(posedge clk); #1; wd_valid=0;
+        while(!tick_valid) @(posedge clk);
+        #1;
+        check(td0==16'h1000 && td1==16'h1100 && td2==16'h1200 && td3==16'h1300 && tick_undf==0,
+              "TC-QF-06 in-flight read returns all original heads");
+        repeat(18) @(posedge clk); #1;
+        check(fifo_full==4'hf && fifo_ovf==0,"TC-QF-06 pending arrivals refill every freed slot without overflow");
+        for(i=1;i<=16;i=i+1) begin
+            tick(got,got_undf);
+            if(i<16)
+                check(td0==16'h1000+i && td1==16'h1100+i && td2==16'h1200+i && td3==16'h1300+i && tick_undf==0,
+                      "TC-QF-06 queued words remain ordered on all legs");
+            else
+                check(td0==16'h2000 && td1==16'h2100 && td2==16'h2200 && td3==16'h2300 && tick_undf==0,
+                      "TC-QF-06 all deferred arrivals are delivered exactly once");
+        end
+        @(posedge clk); #1;
+        check(fifo_empty==4'hf && fifo_word_cnt==0 && fifo_ovf==0,
+              "TC-QF-06 every queue drained with no loss or duplicate");
 
         $display("");
         $display("RESULTS: %0d passed, %0d failed", n_pass, n_fail);
