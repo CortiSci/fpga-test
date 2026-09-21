@@ -194,19 +194,23 @@ class Emu:
         self.pipe.write_reg(dx.REG_ACQ_ALL_RUN, 0x000F, 5.0, [])
         return rc
 
-    def wait_sensors(self, pred, max_frames: int = 400, timeout: float = 25.0, stride: int = 1):
+    def wait_sensors(self, pred, max_frames: int | None = 400, timeout: float = 25.0, stride: int = 1):
         """Read frames until pred(sensors) holds.
 
         A source switch is not visible in the very next frame: the emulator runs
         at 2.5 kHz while this reader is far slower, so a backlog of pre-switch
         frames is in flight.  Waiting for the condition instead of skipping a
         guessed number of frames is what makes these checks deterministic.
+        max_frames=None uses only the time bound when queue depth is unknown.
         Returns (ok, last_sensors, frames_read)."""
-        end = time.time() + timeout
+        end = time.monotonic() + timeout
         last: list[int] | None = None
         n = 0
-        while n < max_frames and time.time() < end:
-            p = self.pipe.next_frame(3.0)
+        while max_frames is None or n < max_frames:
+            remaining = end - time.monotonic()
+            if remaining <= 0:
+                break
+            p = self.pipe.next_frame(min(3.0, remaining))
             if p is None:
                 break
             n += 1
@@ -584,7 +588,12 @@ def group_fifo(exe: Path):
         fifo.write(struct.pack("<64h", *([777] * 64)))
         fifo.close()
         fifo = None
-        ok, s, n = emu.wait_sensors(lambda s: s.count(777) == 64)
+        # The reader may be hundreds of frames behind after decoding the prior
+        # source. Drain quickly under a wall-clock bound, not a guessed queue
+        # length. EOF holds the last frame, so sampling every 25 frames cannot
+        # skip this terminal value. Still require its exact padded contents.
+        ok, s, n = emu.wait_sensors(lambda s: s.count(777) == 64,
+                                  max_frames=None, timeout=10.0, stride=25)
         check("FIFO closed mid-frame -> tail zero-padded",
               ok and s.count(0) == SENSORS - 64,
               f"after {n} frames 777x{s.count(777) if s else '?'}")
