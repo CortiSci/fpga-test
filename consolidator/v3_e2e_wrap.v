@@ -2,12 +2,12 @@
 // End-to-end harness for the V3 telemetry engine (main-branch redesign):
 //
 //   4x asic_stream_tx (tail, bit-plane raw words, frame-sync gate)
-//     -> 4x spi_ch_stream (lane reassembly: assembled sensor samples)
+//     -> 4x spi_ch_stream (sweep-anchored raw plane reception)
 //     -> leg_quad_fifo -> telem_engine_v3 -> crc32
 //
 // Wired the way §11 of telemetry_v3_spec.md prescribes for the top level.
 // The C++ TB drives the board's clock relationships and checks the emitted
-// 4103-word frames against THE SPEC, not against the RTL.
+// 4105-word frames against THE SPEC, not against the RTL.
 module v3_e2e_wrap (
     input  wire        clk_48m,
     input  wire [3:0]  spi_sclk,     // per-leg tail SCLK (TB gates on strm_active)
@@ -34,6 +34,7 @@ module v3_e2e_wrap (
     wire [15:0] w_data [0:3];
     wire [3:0]  w_valid;
 
+    wire [3:0] wrap_flush, wrap_pk, rd_mask, leg_resync, ovf_pulse;
     genvar g;
     generate
         for (g = 0; g < 4; g = g + 1) begin : legs
@@ -68,10 +69,10 @@ module v3_e2e_wrap (
                 .word_data   (w_data[g]),
                 .word_valid  (w_valid[g]),
                 .par_err_flag(par_err[g]),
-                .resync_arm  (wrap_resync_arm),
-                .fifo_full   (wrap_full[g]),
-                .quad_flush  (wrap_flush[g]),
-                .w0_dist     (wrap_hp[g*10 +: 10]),
+                .resync_req  (ovf_pulse[g] | leg_resync[g]),
+                .anchor_flush(wrap_flush[g]),
+                .raw_word_done(),
+                .miso_reg    (),
                 .phase_known (wrap_pk[g])
             );
         end
@@ -82,12 +83,6 @@ module v3_e2e_wrap (
     wire [15:0] tick_d0, tick_d1, tick_d2, tick_d3;
     wire [3:0]  tick_undf, fill_ge4;
     wire [3:0]  fifo_full_w, fifo_empty_w;
-    wire        wrap_resync_arm;
-    wire [3:0]  wrap_flush;
-    wire [39:0] wrap_hp;
-    wire [3:0]  wrap_pk;
-    wire [19:0] wrap_wcnt = fifo_wc_w;
-    wire [3:0]  wrap_full = fifo_full_w;
     wire [19:0] fifo_wc_w;
 
     leg_quad_fifo quad (
@@ -111,7 +106,10 @@ module v3_e2e_wrap (
         .fifo_empty   (fifo_empty_w),
         .fifo_ovf     (quad_ovf),
         .fifo_word_cnt(fifo_wc_w),
-        .ch_local_rst (wrap_flush)
+        .ch_local_rst (4'b0),
+        .flush        (wrap_flush),
+        .ovf_pulse    (ovf_pulse),
+        .rd_mask      (rd_mask)
     );
 
     wire        crc_init_w, crc_valid_w, crc_last_w;
@@ -132,14 +130,14 @@ module v3_e2e_wrap (
 
     // Free-running 2.5 kHz frame counter, as frame_counter.v provides.
     // Match frame_counter.v's complete 29-bit external-counter contract,
-    // even though only bits [12:0] are sent in the telemetry header.
+    // carried in separate low/high counter words in the telemetry header.
     reg [28:0] frame_cnt;
     reg [14:0] fc_div;
     always @(posedge clk_48m or negedge rst_n) begin
         if (!rst_n) begin
             frame_cnt <= 29'd0;
             fc_div    <= 15'd0;
-        end else if (fc_div == 15'd20479) begin
+        end else if (fc_div == 15'd19999) begin
             fc_div    <= 15'd0;
             frame_cnt <= frame_cnt + 29'd1;
         end else begin
@@ -153,7 +151,7 @@ module v3_e2e_wrap (
         .telem_start     (telem_start),
         .sw_reset        (1'b0),
         .run_any         (|run),
-        .frame_aligned   (1'b1),
+        .frame_aligned   (fc_div == 15'd19999),
         .ext_frame_cnt   (frame_cnt),
         .tick_req        (tick_req),
         .tick_data_0     (tick_d0),
@@ -175,12 +173,11 @@ module v3_e2e_wrap (
         .telem_tx_valid  (tx_valid),
         .telem_tx_ready  (tx_ready),
         .framer_busy     (framer_busy),
-        .resync_arm      (wrap_resync_arm),
-        .w0_dist_0       (wrap_hp[9:0]),
-        .w0_dist_1       (wrap_hp[19:10]),
-        .w0_dist_2       (wrap_hp[29:20]),
-        .w0_dist_3       (wrap_hp[39:30]),
-        .leg_fill        (wrap_wcnt),
-        .phase_known     (wrap_pk)
+        .leg_anchored    (wrap_pk),
+        .leg_empty       (fifo_empty_w),
+        .legs_armed      (run),
+        .rd_mask         (rd_mask),
+        .leg_resync      (leg_resync),
+        .drop_frame      (1'b0) // no USB CDC in this scoped datapath harness
     );
 endmodule
