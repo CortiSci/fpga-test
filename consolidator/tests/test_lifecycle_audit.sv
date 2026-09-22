@@ -27,12 +27,13 @@ task automatic lc_packet;
     integer i,b,k,len;
     reg [31:0] crc;
     reg [7:0] byteval;
+    reg [15:0] incoming;
     begin
-        lc_start=lc_cursor; lc_word(lc_words[0]);
+        lc_start=lc_cursor; lc_word(incoming); lc_words[0]=incoming;
         if (lc_words[0]===16'h55aa) begin len=4; lc_kind=0; end
         else if (lc_words[0]===16'h0001) begin len=4105; lc_kind=1; end
         else $fatal(1,"LC unexpected packet tag %h at %0d",lc_words[0],lc_start);
-        for(i=1;i<len;i=i+1) lc_word(lc_words[i]);
+        for(i=1;i<len;i=i+1) begin lc_word(incoming); lc_words[i]=incoming; end
         if(lc_kind) begin
             crc=32'hffffffff;
             for(i=0;i<4103;i=i+1) for(b=0;b<2;b=b+1) begin

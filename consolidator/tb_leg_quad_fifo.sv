@@ -145,16 +145,16 @@ module tb_leg_quad_fifo;
         for (i = 0; i < 16; i = i + 1) push0(16'h0100 + i[15:0]);
         check(cnt0 == 5'd16 && fifo_full[0], "TC-QF-04 sixteen words fill the leg");
         check(fifo_ovf[0] == 1'b0, "TC-QF-04 no overflow flag while exactly full");
-        fork
-            begin : count_pulses
-                // Full arrivals may wait up to 16 clocks for an imminent read.
-                // With no reader they must expire before the next wire word.
-                repeat (22) begin @(posedge clk); #1; if (ovf_pulse[0]) n_ovf_pulses = n_ovf_pulses + 1; end
-            end
-            begin
-                push0(16'h0BAD);
-            end
-        join
+        @(posedge clk); #1; wd0=16'h0BAD; wd_valid[0]=1;
+        @(posedge clk); #1; wd_valid[0]=0;
+        check(!ovf_pulse[0],"TC-QF-04 full arrival initially retained");
+        // Exact deadline is part of the data-hold safety proof. No early
+        // discard, and no request survives long enough to read the next word.
+        for(i=1;i<=16;i=i+1) begin
+            @(posedge clk); #1;
+            check(ovf_pulse[0]==(i==16),"TC-QF-04 expires exactly 16 clocks after acceptance");
+            if(ovf_pulse[0]) n_ovf_pulses=n_ovf_pulses+1;
+        end
         $display("[TB_QF] TC-QF-04 overflow: pulses=%0d sticky=%b cnt=%0d", n_ovf_pulses, fifo_ovf[0], cnt0);
         check(n_ovf_pulses == 1, "TC-QF-04 exactly one ovf_pulse for the dropped word");
         check(fifo_ovf[0] == 1'b1, "TC-QF-04 sticky fifo_ovf set");
