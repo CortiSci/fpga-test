@@ -147,7 +147,9 @@ module tb_leg_quad_fifo;
         check(fifo_ovf[0] == 1'b0, "TC-QF-04 no overflow flag while exactly full");
         fork
             begin : count_pulses
-                repeat (6) begin @(posedge clk); #1; if (ovf_pulse[0]) n_ovf_pulses = n_ovf_pulses + 1; end
+                // Full arrivals may wait up to 16 clocks for an imminent read.
+                // With no reader they must expire before the next wire word.
+                repeat (22) begin @(posedge clk); #1; if (ovf_pulse[0]) n_ovf_pulses = n_ovf_pulses + 1; end
             end
             begin
                 push0(16'h0BAD);
@@ -211,6 +213,22 @@ module tb_leg_quad_fifo;
         @(posedge clk); #1;
         check(fifo_empty==4'hf && fifo_word_cnt==0 && fifo_ovf==0,
               "TC-QF-06 every queue drained with no loss or duplicate");
+
+        // TC-QF-07: full arrival BEFORE tick_req (the old read_pending guard
+        // rejects this even though the pending input is still safely held).
+        @(posedge clk); #1; sync_rst=1;
+        @(posedge clk); #1; sync_rst=0;
+        for(i=0;i<16;i=i+1) push0(16'h3000+i);
+        push0(16'h4000);
+        repeat(3) @(posedge clk);
+        tick(got,got_undf);
+        check(got==16'h3000 && !got_undf,"TC-QF-07 original head survives pre-read arrival");
+        for(i=1;i<=16;i=i+1) begin
+            tick(got,got_undf);
+            check(got==(i==16 ? 16'h4000 : 16'h3000+i) && !got_undf,
+                  "TC-QF-07 pre-read pending input preserved in order");
+        end
+        check(fifo_empty[0] && !fifo_ovf[0],"TC-QF-07 deferred input does not cause false overflow");
 
         $display("");
         $display("RESULTS: %0d passed, %0d failed", n_pass, n_fail);

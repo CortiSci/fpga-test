@@ -617,10 +617,16 @@ module tb_top;
         @(posedge devrst_n);
         #500;
         $display("[TB_PING] SPI ping sequence starting at %0t ns", $time);
+`ifdef RUN_FAST_CFG
+        for(fast_cfg_div=0;fast_cfg_div<3;fast_cfg_div=fast_cfg_div+1) begin
+`endif
         run_SP01();
         run_SP02();
         run_SP03();
         run_SP04();
+`ifdef RUN_FAST_CFG
+        end
+`endif
         #1000;
         $display("[TB_PING] All SPI ping tests complete at %0t ns", $time);
         $finish;

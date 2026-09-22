@@ -17,6 +17,9 @@
 // before this file in tb_top.sv.
 // Do NOT add `timescale or import directives here.
 
+`ifdef RUN_FAST_CFG
+integer fast_cfg_div=0;
+`endif
 task automatic run_spi_ping_ch(input int ch);
 `ifdef ICARUS
     // Icarus cannot pass unpacked arrays as task parameters.  Use the packed
@@ -43,7 +46,11 @@ task automatic run_spi_ping_ch(input int ch);
     // Power-up default is 0 (25.6 MHz); always set explicitly so tests are
     // self-contained and independent of prior test state.
     tb_top.u_ft600q.send_command_frame(CMD_MAGIC, flags_wr(),
+`ifdef RUN_FAST_CFG
+                                       REG_SPI_CLK_DIV, fast_cfg_div[15:0]);
+`else
                                        REG_SPI_CLK_DIV, 16'h001F);
+`endif
     tb_top.u_ft600q.wait_response_frame_typed(m, f, a, d);
     #200;
 
