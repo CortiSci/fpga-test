@@ -19,10 +19,10 @@
 //             count must be 0 afterwards, the slot stuffed+flagged, and the next
 //             written word must be the next head
 //   TC-QF-03  flush ON the capture cycle: count 0 afterwards, next word readable
-//   TC-QF-04  17th word into a full leg: one ovf_pulse, sticky fifo_ovf, word dropped
+//   TC-QF-04  32nd word into a full leg: one ovf_pulse, sticky fifo_ovf, word dropped
 //   TC-QF-05  flush keeps the sticky fifo_ovf, clears the count
 //   TC-QF-06  full legs accept an arrival while their read is in flight;
-//             the existing pending requests preserve all 17 words in order
+//             the existing pending requests preserve all 32 words in order
 //
 // Compiles under Icarus (C-05/C-10 respected: no unpacked task ports, decls first).
 // ============================================================================
@@ -140,27 +140,20 @@ module tb_leg_quad_fifo;
         check(got == 16'h7777 && !got_undf, "TC-QF-03 next word is the head after the flush");
         @(posedge clk); #1;
 
-        // ── TC-QF-04 overflow: 17th word dropped, one pulse, sticky flag ────
-        n_ovf_pulses = 0;
-        for (i = 0; i < 16; i = i + 1) push0(16'h0100 + i[15:0]);
-        check(cnt0 == 5'd16 && fifo_full[0], "TC-QF-04 sixteen words fill the leg");
-        check(fifo_ovf[0] == 1'b0, "TC-QF-04 no overflow flag while exactly full");
-        @(posedge clk); #1; wd0=16'h0BAD; wd_valid[0]=1;
-        @(posedge clk); #1; wd_valid[0]=0;
-        check(!ovf_pulse[0],"TC-QF-04 full arrival initially retained");
-        // Exact deadline is part of the data-hold safety proof. No early
-        // discard, and no request survives long enough to read the next word.
-        for(i=1;i<=16;i=i+1) begin
-            @(posedge clk); #1;
-            check(ovf_pulse[0]==(i==16),"TC-QF-04 expires exactly 16 clocks after acceptance");
-            if(ovf_pulse[0]) n_ovf_pulses=n_ovf_pulses+1;
-        end
-        $display("[TB_QF] TC-QF-04 overflow: pulses=%0d sticky=%b cnt=%0d", n_ovf_pulses, fifo_ovf[0], cnt0);
-        check(n_ovf_pulses == 1, "TC-QF-04 exactly one ovf_pulse for the dropped word");
-        check(fifo_ovf[0] == 1'b1, "TC-QF-04 sticky fifo_ovf set");
-        check(cnt0 == 5'd16, "TC-QF-04 the dropped word did not change the count");
-        tick(got, got_undf);
-        check(got == 16'h0100 && !got_undf, "TC-QF-04 head is still the oldest queued word");
+        // TC-QF-04: 31 words fill the RAM ring. The 32nd without a pending
+        // read must produce exactly one loss event and preserve queued data.
+        n_ovf_pulses=0;
+        for(i=0;i<31;i=i+1) push0(16'h0100+i);
+        check(cnt0==31 && fifo_full[0],"TC-QF-04 31 words fill the leg");
+        check(!fifo_ovf[0],"TC-QF-04 no overflow while exactly full");
+        fork
+            begin repeat(6) begin @(posedge clk); #1; if(ovf_pulse[0]) n_ovf_pulses=n_ovf_pulses+1; end end
+            begin push0(16'h0BAD); end
+        join
+        check(n_ovf_pulses==1,"TC-QF-04 exactly one overflow for rejected word");
+        check(fifo_ovf[0] && cnt0==31,"TC-QF-04 full count preserved and loss flagged");
+        tick(got,got_undf);
+        check(got==16'h0100 && !got_undf,"TC-QF-04 oldest head preserved");
 
         // ── TC-QF-05 flush clears the count, keeps the sticky flag ──────────
         @(posedge clk); #1; flush[0] = 1'b1;
@@ -176,11 +169,11 @@ module tb_leg_quad_fifo;
         // TC-QF-06: T03 restart failure. All four RAM queues are full. The
         // next input arrives on LEG6's read/capture edge, two clocks before
         // LEG8's capture. It must wait in the existing pending request, not
-        // be dropped merely because the RAM count is still 16. The input
+        // be dropped merely because the RAM count is still 31. The input
         // remains stable for a full serial-word interval (>=18 clocks).
         @(posedge clk); #1; ch_local_rst=4'hf;
         @(posedge clk); #1; ch_local_rst=0;
-        for(i=0;i<16;i=i+1) begin
+        for(i=0;i<31;i=i+1) begin
             @(posedge clk); #1;
             wd0=16'h1000+i; wd1=16'h1100+i;
             wd2=16'h1200+i; wd3=16'h1300+i;
@@ -201,9 +194,9 @@ module tb_leg_quad_fifo;
               "TC-QF-06 in-flight read returns all original heads");
         repeat(18) @(posedge clk); #1;
         check(fifo_full==4'hf && fifo_ovf==0,"TC-QF-06 pending arrivals refill every freed slot without overflow");
-        for(i=1;i<=16;i=i+1) begin
+        for(i=1;i<=31;i=i+1) begin
             tick(got,got_undf);
-            if(i<16)
+            if(i<31)
                 check(td0==16'h1000+i && td1==16'h1100+i && td2==16'h1200+i && td3==16'h1300+i && tick_undf==0,
                       "TC-QF-06 queued words remain ordered on all legs");
             else
@@ -214,8 +207,8 @@ module tb_leg_quad_fifo;
         check(fifo_empty==4'hf && fifo_word_cnt==0 && fifo_ovf==0,
               "TC-QF-06 every queue drained with no loss or duplicate");
 
-        // TC-QF-07: full arrival BEFORE tick_req (the old read_pending guard
-        // rejects this even though the pending input is still safely held).
+        // TC-QF-07: 17th arrival BEFORE tick_req. The former 16-word ring
+        // rejected it; alignment headroom must preserve it without borrowing data.
         @(posedge clk); #1; sync_rst=1;
         @(posedge clk); #1; sync_rst=0;
         for(i=0;i<16;i=i+1) push0(16'h3000+i);
