@@ -113,8 +113,14 @@ task automatic lc_recover(input reg bist,input integer watermark,input reg allow
         consecutive=0; pattern=16'haced;
         for(f=0;f<16 && consecutive<2;f=f+1) begin
             lc_packet(); good=lc_kind && lc_start>=watermark;
+            if(!lc_kind) begin
+                if(lc_transition && lc_words[1]===16'hffff && lc_words[2]===16'h0020)
+                    lc_parity_reports=lc_parity_reports+1;
+                else $fatal(1,"LC unexpected response during recovery %h %h %h",
+                            lc_words[1],lc_words[2],lc_words[3]);
+            end
             if(good) for(ch=0;ch<4;ch=ch+1) begin
-                if((lc_words[4099+ch] & (allow_sticky_overflow ? 16'h5000 : 16'h7000)) != 0 ||
+                if((lc_words[4099+ch] & (allow_sticky_overflow ? 16'h5000 : 16'h7000)) !== 16'h0000 ||
                    (lc_words[4099+ch] & 16'h03ff)==16'h03ff) good=0;
                 if(bist && ch==0) begin
                     previous=lc_words[3+ch];
