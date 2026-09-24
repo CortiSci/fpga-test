@@ -32,9 +32,10 @@ Legs
   imp_even  TELEM_EN=0x02.  Each side must deliver the -if file on the even SD
   imp_odd   TELEM_EN=0x03.  lanes / odd lanes, in the tail's impedance packing
   inject    The bring-up tool's impedance SWEEP on a few pixels (2026-09-11;
-            since 2026-09-24 with the tail in its impedance mode for the lane's
-            parity, TELEM_EN 2 or 3, so the injection must survive the T0/T1
-            packing and is decoded per 5 kHz sweep):
+            since 2026-09-24 as the tool does it: the tail in TELEM_EN 2 for an
+            even lane and 3 for an odd one, Global byte0 0x50, so the injection
+            must survive the T0/T1 packing in both modes; decoded per 5 kHz
+            sweep):
             normal-mode streaming, one pixel at a time given EN_IM through the
             tail's CS passthrough (Global PSLICE select + the 64-row Pixel shift
             chain), the +/-65 nA square wave recovered per pixel exactly as
@@ -119,8 +120,11 @@ def model_z_ohms(asic: int, row: int, lane: int) -> float:
     return 1000.0 + 100.0 * (row * 16 + lane) + 25.0 * asic
 def model_swing_counts(asic: int, row: int, lane: int) -> int:
     return 2 * round(MODEL_INJECT_A * model_z_ohms(asic, row, lane) / (MODEL_UV_PER_COUNT * 1e-6))
-INJECT_LANE, INJECT_ROWS, INJECT_FRAMES = 5, [0, 1, 3], 16
-INJECT_IMP_MODE = 2 | (INJECT_LANE & 1)        # the tail's impedance mode that forwards INJECT_LANE
+# One even and one odd lane, so both of the tail's impedance modes carry an
+# injecting pixel; the tool's sweep picks the mode by slice parity the same way.
+INJECT_LANES, INJECT_ROWS, INJECT_FRAMES = [4, 5], [0, 1, 3], 16
+def inject_mode(lane: int) -> int:
+    return 2 | (lane & 1)                       # TELEM_EN 2 forwards even lanes, 3 odd
 CTRL_RUN = 0x11            # RO_RSTn=1 + MCLK_EN=1
 N_SENSORS = 4096
 
@@ -683,11 +687,12 @@ def measure_pixel(frames: list[Frame], ch: int, lane: int) -> tuple[int, int, in
 
 def run_inject(name: str, exe: Path, args: list[str], first_frame_timeout: float, frame_timeout: float,
                cmd_timeout: float, log) -> tuple[RunResult, dict[tuple[int, int], tuple[int, int, int] | None]]:
-    """Bring the emulator up in normal mode, then walk INJECT_ROWS on lane
-    INJECT_LANE of every leg exactly as the tool's sequential sweep does: RUN=0,
-    Global PSLICE=lane, 64 x PIX_OFF to clear the chain, PIX_INJECT, then one
-    PIX_OFF per row advance; RUN=1, capture INJECT_FRAMES frames, RUN=0 + drain.
-    Returns the per-(leg,row) measurement."""
+    """Bring the emulator up, then walk INJECT_ROWS on each of INJECT_LANES of
+    every leg exactly as the tool's sequential sweep does: RUN=0, TELEM_EN for
+    the lane's parity (2 even, 3 odd), Global byte0 0x50 (Mode-1 clocks) with
+    PSLICE=lane, 64 x PIX_OFF to clear the chain, PIX_INJECT, then one PIX_OFF
+    per row advance; RUN=1, capture INJECT_FRAMES frames, RUN=0 + drain.
+    Returns the per-(leg,lane,row) measurement."""
     res = RunResult(name, str(exe), 1, [], [], 0, False)
     meas: dict[tuple[int, int], tuple[int, int, int] | None] = {}
     if not exe.exists():
@@ -707,7 +712,7 @@ def run_inject(name: str, exe: Path, args: list[str], first_frame_timeout: float
         pipe.connect()
         res.launch_ok = True
         host = Host(pipe, cmd_timeout, log)
-        info = host.bringup_and_run(INJECT_IMP_MODE)
+        info = host.bringup_and_run(inject_mode(INJECT_LANES[0]))
         res.ping = info["ping"]
         # A first frame proves the stream is up, then stop it for the pixel writes.
         first = pipe.next_frame(first_frame_timeout)
@@ -716,39 +721,41 @@ def run_inject(name: str, exe: Path, args: list[str], first_frame_timeout: float
         if first is None:
             res.error = "no telemetry frame after bring-up"
             return res, meas
-        prev_row = None
-        for row in INJECT_ROWS:
-            for ch in range(4):
-                if prev_row is None:
-                    host.asic_write(ch, TAIL_CS1_PASS, [0xA0, 0x4E, INJECT_LANE & 0x0F])   # Global: PSLICE = lane
-                    for _ in range(64):
-                        host.asic_write(ch, TAIL_CS2_PASS, PIX_OFF)                       # clear the chain
-                    host.asic_write(ch, TAIL_CS2_PASS, PIX_INJECT)                        # the injecting word
-                    for _ in range(row):
-                        host.asic_write(ch, TAIL_CS2_PASS, PIX_OFF)
-                else:
-                    for _ in range(row - prev_row):
-                        host.asic_write(ch, TAIL_CS2_PASS, PIX_OFF)                       # advance one row
-            prev_row = row
-            host.stray.clear()
-            pipe.write_reg(REG_ACQ_ALL_RUN, 0x000F, cmd_timeout, host.stray)
-            payloads: list[bytes] = list(host.stray)
-            tmo = first_frame_timeout
-            while len(payloads) < INJECT_FRAMES:
-                m = pipe.next_frame(tmo)
-                if m is None:
-                    break
-                payloads.append(m)
-                tmo = frame_timeout
-            host.stop()
-            host.drain(1.0)
-            frames = [Frame.parse(p) for p in payloads]
-            res.frames.extend(frames)
-            for ch in range(4):
-                meas[(ch, row)] = measure_pixel(frames, ch, INJECT_LANE)
-            log(f"  [{name}] row {row}: {len(frames)} frames; " + "  ".join(
-                f"leg{ch + 5}=" + (f"g{m[0]} swing {m[1]} ({m[2]} smp)" if (m := meas[(ch, row)]) else "none")
-                for ch in range(4)))
+        for lane in INJECT_LANES:
+            prev_row = None
+            for row in INJECT_ROWS:
+                for ch in range(4):
+                    if prev_row is None:
+                        host.spi_xact(ch, 2, [TAIL_TELEM_EN, inject_mode(lane)], False)    # the mode for this lane's parity
+                        host.asic_write(ch, TAIL_CS1_PASS, [0x50, 0x4E, lane & 0x0F])     # Global: Mode-1 clocks, PSLICE = lane
+                        for _ in range(64):
+                            host.asic_write(ch, TAIL_CS2_PASS, PIX_OFF)                   # clear the chain
+                        host.asic_write(ch, TAIL_CS2_PASS, PIX_INJECT)                    # the injecting word
+                        for _ in range(row):
+                            host.asic_write(ch, TAIL_CS2_PASS, PIX_OFF)
+                    else:
+                        for _ in range(row - prev_row):
+                            host.asic_write(ch, TAIL_CS2_PASS, PIX_OFF)                   # advance one row
+                prev_row = row
+                host.stray.clear()
+                pipe.write_reg(REG_ACQ_ALL_RUN, 0x000F, cmd_timeout, host.stray)
+                payloads: list[bytes] = list(host.stray)
+                tmo = first_frame_timeout
+                while len(payloads) < INJECT_FRAMES:
+                    m = pipe.next_frame(tmo)
+                    if m is None:
+                        break
+                    payloads.append(m)
+                    tmo = frame_timeout
+                host.stop()
+                host.drain(1.0)
+                frames = [Frame.parse(p) for p in payloads]
+                res.frames.extend(frames)
+                for ch in range(4):
+                    meas[(ch, lane, row)] = measure_pixel(frames, ch, lane)
+                log(f"  [{name}] lane {lane} (TELEM_EN {inject_mode(lane)}) row {row}: {len(frames)} frames; " + "  ".join(
+                    f"leg{ch + 5}=" + (f"g{m[0]} swing {m[1]} ({m[2]} smp)" if (m := meas[(ch, lane, row)]) else "none")
+                    for ch in range(4)))
         res.n_short = pipe.n_short
     except Exception as e:      # noqa: BLE001 — report, do not crash the other leg
         res.error = f"{type(e).__name__}: {e}"
@@ -774,7 +781,7 @@ def make_dc_file(dat: Path) -> None:
 # =============================================================================
 # main
 # =============================================================================
-LEGS = {"normal": 1, "imp_even": 2, "imp_odd": 3, "inject": INJECT_IMP_MODE}
+LEGS = {"normal": 1, "imp_even": 2, "imp_odd": 3, "inject": 0}   # inject: modes 2 AND 3, by lane parity
 
 
 def main() -> int:
@@ -917,9 +924,8 @@ def main() -> int:
                                            "diff_sensors": n_diff, "shape": shape}
 
     def run_inject_pair(leg: str) -> None:
-        mode = LEGS[leg]
-        log(f"=== leg {leg}: the impedance sweep on lane {INJECT_LANE}, chain rows {INJECT_ROWS}, all four legs "
-            f"(-f = -if = DC file, TELEM_EN={mode}) ===")
+        log(f"=== leg {leg}: the impedance sweep on lanes {INJECT_LANES} (TELEM_EN by lane parity), chain rows "
+            f"{INJECT_ROWS}, all four legs (-f = -if = DC file) ===")
         emu_args = ["-f", str(dc), "-if", str(dc), "-loop"]     # the DC file in either mode's source
         sides: dict[str, tuple[RunResult, dict]] = {}
         if not a.rtl_only:
@@ -928,10 +934,10 @@ def main() -> int:
         if not a.sw_only:
             sides["rtl"] = run_inject("rtl", rtl_exe, emu_args, a.first_frame_timeout, a.frame_timeout, a.cmd_timeout, log)
             log(f"  [rtl] {len(sides['rtl'][0].frames)} frames in {sides['rtl'][0].seconds:.1f}s  {sides['rtl'][0].error}")
-        legrep = {"mode": mode, "sides": {}}
+        legrep = {"mode": {lane: inject_mode(lane) for lane in INJECT_LANES}, "sides": {}}
         for k, (r, m) in sides.items():
             legrep["sides"][k] = {"frames": len(r.frames), "ping": r.ping, "error": r.error, "seconds": round(r.seconds, 1),
-                                  "measurements": {f"leg{ch + 5}/row{row}": v for (ch, row), v in m.items()},
+                                  "measurements": {f"leg{ch + 5}/lane{lane}/row{row}": v for (ch, lane, row), v in m.items()},
                                   "frames_per_s": round(len(r.frames) / r.seconds, 2) if r.seconds > 0 else None}
         report["legs"][leg] = legrep
         if len(sides) < 2:
@@ -947,16 +953,17 @@ def main() -> int:
 
         add("both_launch", sw.launch_ok and rtl.launch_ok and not sw.error and not rtl.error,
             f"sw={sw.launch_ok} rtl={rtl.launch_ok} {sw.error} {rtl.error}")
-        for row in INJECT_ROWS:
-            chain_row = 63 - row                    # the injecting word's position in the 64-row chain
-            for ch in range(4):
-                s_m, r_m = swm.get((ch, row)), rtlm.get((ch, row))
-                want = model_swing_counts(ch, chain_row, INJECT_LANE)
-                ok = (s_m is not None and r_m is not None and s_m[0] == r_m[0] == chain_row
-                      and abs(s_m[1] - r_m[1]) <= 1 and abs(s_m[1] - want) <= 1)
-                add(f"pixel/leg{ch + 5}_row{row}", ok,
-                    f"sw={'g%d swing %d' % s_m[:2] if s_m else 'none'} rtl={'g%d swing %d' % r_m[:2] if r_m else 'none'}"
-                    f" expected g{chain_row} swing {want} (Z={model_z_ohms(ch, chain_row, INJECT_LANE):.0f} ohm)")
+        for lane in INJECT_LANES:
+            for row in INJECT_ROWS:
+                chain_row = 63 - row                    # the injecting word's position in the 64-row chain
+                for ch in range(4):
+                    s_m, r_m = swm.get((ch, lane, row)), rtlm.get((ch, lane, row))
+                    want = model_swing_counts(ch, chain_row, lane)
+                    ok = (s_m is not None and r_m is not None and s_m[0] == r_m[0] == chain_row
+                          and abs(s_m[1] - r_m[1]) <= 1 and abs(s_m[1] - want) <= 1)
+                    add(f"pixel/leg{ch + 5}_lane{lane}_row{row}", ok,
+                        f"sw={'g%d swing %d' % s_m[:2] if s_m else 'none'} rtl={'g%d swing %d' % r_m[:2] if r_m else 'none'}"
+                        f" expected g{chain_row} swing {want} (Z={model_z_ohms(ch, chain_row, lane):.0f} ohm)")
 
     for leg in [s.strip() for s in a.legs.split(",") if s.strip()]:
         if leg not in LEGS:
