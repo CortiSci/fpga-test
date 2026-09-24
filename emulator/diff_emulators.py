@@ -31,10 +31,10 @@ Legs
   normal    TELEM_EN=0x01.  Each side must deliver the -f file.
   imp_even  TELEM_EN=0x02.  Each side must deliver the -if file on the even SD
   imp_odd   TELEM_EN=0x03.  lanes / odd lanes, in the tail's impedance packing
-  inject_imp  The same sweep with the tail in its impedance mode for the lane's
-            parity (TELEM_EN 2 or 3, the tool's fast sweep, 2026-09-24): the
-            injection must survive the T0/T1 packing, decoded per 5 kHz sweep.
-  inject    The bring-up tool's impedance SWEEP on a few pixels (2026-09-11):
+  inject    The bring-up tool's impedance SWEEP on a few pixels (2026-09-11;
+            since 2026-09-24 with the tail in its impedance mode for the lane's
+            parity, TELEM_EN 2 or 3, so the injection must survive the T0/T1
+            packing and is decoded per 5 kHz sweep):
             normal-mode streaming, one pixel at a time given EN_IM through the
             tail's CS passthrough (Global PSLICE select + the 64-row Pixel shift
             chain), the +/-65 nA square wave recovered per pixel exactly as
@@ -643,48 +643,34 @@ def make_pattern_files(dat: Path, imp: Path) -> None:
 # =============================================================================
 # The impedance sweep on a few pixels (leg "inject")
 # =============================================================================
-def measure_pixel(frames: list[Frame], ch: int, lane: int, telem_mode: int = 1) -> tuple[int, int, int] | None:
-    """CannedFunctions::measureCurrent on captured frames: lane `lane` of leg `ch`,
-    every true sweep group, binned by frame_cnt & 3; the group with the most
-    samples (only one pixel is enabled) gives (group, swing_counts, n_samples),
-    swing = max(bin mean) - min(bin mean).  None when no group has all four bins.
-    telem_mode 2/3 (the tool's fast sweep): the leg's 1024 words are two 512-word
-    5 kHz sweeps of 64 rows x 8 words, lane k = lane >> 1 at bits 2k (T0) and
-    2k+1 (T1); binned by 5 kHz sweep ordinal, 2*frame_cnt + sweep."""
+def measure_pixel(frames: list[Frame], ch: int, lane: int) -> tuple[int, int, int] | None:
+    """CannedFunctions::measureCurrent on captured frames, the tail in its
+    impedance mode: the leg's 1024 words are two 512-word 5 kHz sweeps of 64
+    rows x 8 words, lane k = lane >> 1 at bits 2k (T0) and 2k+1 (T1); every row,
+    binned by 5 kHz sweep ordinal (2*frame_cnt + sweep); the row with the most
+    samples (only one pixel is enabled) gives (row, swing_counts, n_samples),
+    swing = max(bin mean) - min(bin mean).  None when no row has all four bins."""
     sums: dict[int, list[float]] = {}
     cnts: dict[int, list[int]] = {}
+    k = lane >> 1
     for f in frames:
         pw = f.phases[ch]
         if (pw & 0x5000) or (pw & 0x03FF) > 63:
             continue                                  # UNDF/PAR or no usable phase: not at its phase
-        ph = f.frame_cnt & 3
         lw = leg_words(f.words, ch, pw)               # already de-rotated to true sweep groups
-        if telem_mode >= 2:
-            k = lane >> 1
-            for sw in range(2):
-                fph = (2 * f.frame_cnt + sw) & 3
-                for s in range(64):
-                    v = 0
-                    for p in range(8):
-                        word = lw[512 * sw + 8 * s + p]
-                        v |= ((word >> (2 * k)) & 1) << (15 - 2 * p)
-                        v |= ((word >> (2 * k + 1)) & 1) << (14 - 2 * p)
-                    if v == 0x8000 or v == 0xACED:
-                        continue
-                    sv = v - 0x10000 if v & 0x8000 else v
-                    sums.setdefault(s, [0.0] * 4)[fph] += sv
-                    cnts.setdefault(s, [0] * 4)[fph] += 1
-            continue
-        for g in range(64):
-            planes = lw[16 * g:16 * g + 16]
-            v = 0
-            for k in range(16):
-                v |= ((planes[k] >> lane) & 1) << (15 - k)
-            if v == 0x8000 or v == 0xACED:
-                continue
-            sv = v - 0x10000 if v & 0x8000 else v
-            sums.setdefault(g, [0.0] * 4)[ph] += sv
-            cnts.setdefault(g, [0] * 4)[ph] += 1
+        for sw in range(2):
+            fph = (2 * f.frame_cnt + sw) & 3
+            for s in range(64):
+                v = 0
+                for p in range(8):
+                    word = lw[512 * sw + 8 * s + p]
+                    v |= ((word >> (2 * k)) & 1) << (15 - 2 * p)
+                    v |= ((word >> (2 * k + 1)) & 1) << (14 - 2 * p)
+                if v == 0x8000 or v == 0xACED:
+                    continue
+                sv = v - 0x10000 if v & 0x8000 else v
+                sums.setdefault(s, [0.0] * 4)[fph] += sv
+                cnts.setdefault(s, [0] * 4)[fph] += 1
     best, bestn = -1, 0
     for g, c in cnts.items():
         if sum(c) > bestn:
@@ -696,7 +682,7 @@ def measure_pixel(frames: list[Frame], ch: int, lane: int, telem_mode: int = 1) 
 
 
 def run_inject(name: str, exe: Path, args: list[str], first_frame_timeout: float, frame_timeout: float,
-               cmd_timeout: float, log, telem_mode: int = 1) -> tuple[RunResult, dict[tuple[int, int], tuple[int, int, int] | None]]:
+               cmd_timeout: float, log) -> tuple[RunResult, dict[tuple[int, int], tuple[int, int, int] | None]]:
     """Bring the emulator up in normal mode, then walk INJECT_ROWS on lane
     INJECT_LANE of every leg exactly as the tool's sequential sweep does: RUN=0,
     Global PSLICE=lane, 64 x PIX_OFF to clear the chain, PIX_INJECT, then one
@@ -721,7 +707,7 @@ def run_inject(name: str, exe: Path, args: list[str], first_frame_timeout: float
         pipe.connect()
         res.launch_ok = True
         host = Host(pipe, cmd_timeout, log)
-        info = host.bringup_and_run(telem_mode)
+        info = host.bringup_and_run(INJECT_IMP_MODE)
         res.ping = info["ping"]
         # A first frame proves the stream is up, then stop it for the pixel writes.
         first = pipe.next_frame(first_frame_timeout)
@@ -759,7 +745,7 @@ def run_inject(name: str, exe: Path, args: list[str], first_frame_timeout: float
             frames = [Frame.parse(p) for p in payloads]
             res.frames.extend(frames)
             for ch in range(4):
-                meas[(ch, row)] = measure_pixel(frames, ch, INJECT_LANE, telem_mode)
+                meas[(ch, row)] = measure_pixel(frames, ch, INJECT_LANE)
             log(f"  [{name}] row {row}: {len(frames)} frames; " + "  ".join(
                 f"leg{ch + 5}=" + (f"g{m[0]} swing {m[1]} ({m[2]} smp)" if (m := meas[(ch, row)]) else "none")
                 for ch in range(4)))
@@ -788,7 +774,7 @@ def make_dc_file(dat: Path) -> None:
 # =============================================================================
 # main
 # =============================================================================
-LEGS = {"normal": 1, "imp_even": 2, "imp_odd": 3, "inject": 1, "inject_imp": INJECT_IMP_MODE}
+LEGS = {"normal": 1, "imp_even": 2, "imp_odd": 3, "inject": INJECT_IMP_MODE}
 
 
 def main() -> int:
@@ -937,10 +923,10 @@ def main() -> int:
         emu_args = ["-f", str(dc), "-if", str(dc), "-loop"]     # the DC file in either mode's source
         sides: dict[str, tuple[RunResult, dict]] = {}
         if not a.rtl_only:
-            sides["sw"] = run_inject("sw", sw_exe, emu_args, 30.0, 15.0, a.cmd_timeout, log, mode)
+            sides["sw"] = run_inject("sw", sw_exe, emu_args, 30.0, 15.0, a.cmd_timeout, log)
             log(f"  [sw ] {len(sides['sw'][0].frames)} frames in {sides['sw'][0].seconds:.1f}s  {sides['sw'][0].error}")
         if not a.sw_only:
-            sides["rtl"] = run_inject("rtl", rtl_exe, emu_args, a.first_frame_timeout, a.frame_timeout, a.cmd_timeout, log, mode)
+            sides["rtl"] = run_inject("rtl", rtl_exe, emu_args, a.first_frame_timeout, a.frame_timeout, a.cmd_timeout, log)
             log(f"  [rtl] {len(sides['rtl'][0].frames)} frames in {sides['rtl'][0].seconds:.1f}s  {sides['rtl'][0].error}")
         legrep = {"mode": mode, "sides": {}}
         for k, (r, m) in sides.items():
@@ -976,7 +962,7 @@ def main() -> int:
         if leg not in LEGS:
             log(f"unknown leg {leg}")
             return 2
-        if leg in ("inject", "inject_imp"):
+        if leg == "inject":
             run_inject_pair(leg)
         else:
             run_pair(leg, LEGS[leg])
