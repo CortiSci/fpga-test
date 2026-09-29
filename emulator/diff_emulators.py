@@ -685,6 +685,31 @@ def measure_pixel(frames: list[Frame], ch: int, lane: int) -> tuple[int, int, in
     return best, int(round(max(means) - min(means))), bestn
 
 
+
+def describe_dwell(frames: list[Frame], ch: int, lane: int) -> str:
+    """Why measure_pixel gave up on a leg: per frame the counter, the leg's phase
+    word and how its 64 rows decoded (usable / pixel-off 0x8000 / 0xACED)."""
+    k, parts = lane >> 1, []
+    for f in frames:
+        pw = f.phases[ch]
+        if (pw & 0x5000) or (pw & 0x03FF) > 63:
+            parts.append(f"{f.frame_cnt}:{pw:04x}:skip")
+            continue
+        lw = leg_words(f.words, ch, pw)
+        off = aced = 0
+        for sw in range(2):
+            for s in range(64):
+                v = 0
+                for p in range(8):
+                    word = lw[512 * sw + 8 * s + p]
+                    v |= ((word >> (2 * k)) & 1) << (15 - 2 * p)
+                    v |= ((word >> (2 * k + 1)) & 1) << (14 - 2 * p)
+                off += v == 0x8000
+                aced += v == 0xACED
+        parts.append(f"{f.frame_cnt}:{pw:04x}:off{off}" + (f"/aced{aced}" if aced else ""))
+    return " ".join(parts)
+
+
 def run_inject(name: str, exe: Path, args: list[str], first_frame_timeout: float, frame_timeout: float,
                cmd_timeout: float, log) -> tuple[RunResult, dict[tuple[int, int], tuple[int, int, int] | None]]:
     """Bring the emulator up, then walk INJECT_ROWS on each of INJECT_LANES of
@@ -753,6 +778,9 @@ def run_inject(name: str, exe: Path, args: list[str], first_frame_timeout: float
                 res.frames.extend(frames)
                 for ch in range(4):
                     meas[(ch, lane, row)] = measure_pixel(frames, ch, lane)
+                    if meas[(ch, lane, row)] is None:
+                        # Flaky on CI (~1 dwell in 15, always LEG8, RTL side): say why.
+                        log(f"  [{name}] leg{ch + 5} lane {lane} row {row} unmeasurable -- {describe_dwell(frames, ch, lane)}")
                 log(f"  [{name}] lane {lane} (TELEM_EN {inject_mode(lane)}) row {row}: {len(frames)} frames; " + "  ".join(
                     f"leg{ch + 5}=" + (f"g{m[0]} swing {m[1]} ({m[2]} smp)" if (m := meas[(ch, lane, row)]) else "none")
                     for ch in range(4)))
