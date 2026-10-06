@@ -829,7 +829,7 @@ def main() -> int:
     def log(s: str) -> None:
         print(s, flush=True)
 
-    rel = Path(a.release_dir)
+    rel = Path(a.release_dir).resolve()
     sw_exe, rtl_exe = rel / f"ionm_emulator{EXE}", rel / f"ionm_emu_rtl{EXE}"
     dat, imp = rel / "diff_emulators_pattern.dat", rel / "diff_emulators_imp.dat"
     dc = rel / "diff_emulators_dc.dat"
@@ -847,6 +847,23 @@ def main() -> int:
 
     checks: list[Check] = []
     report: dict = {"legs": {}}
+
+    def single_check(leg: str, name: str, ok: bool, detail: str) -> None:
+        checks.append(Check(leg, name, ok, detail, ""))
+        log(f"  {'PASS' if ok else 'FAIL':5s} {leg}/{name}: {detail}")
+
+    def single_structure(leg: str, side: str, r: RunResult) -> None:
+        single_check(leg, "launch", r.launch_ok and not r.error, r.error or side)
+        single_check(leg, "ping", r.ping == [0x55] * 4, str(r.ping))
+        single_check(leg, "frames_flow", bool(r.frames), f"{len(r.frames)} frames")
+        st = structural(r)
+        for field in ("tag_ok", "cnt_hi_ok", "phase_ok", "crc_ok", "monotonic"):
+            if field == "monotonic" and leg == "inject":
+                # The sweep stops and drains acquisition between dwells; those
+                # intentional gaps are not dropped samples within a dwell.
+                continue
+            single_check(leg, f"structural/{field}", bool(r.frames) and st.get(field, False),
+                         str(st.get(field, False)))
 
     def run_pair(leg: str, mode: int) -> None:
         log(f"=== leg {leg}: TELEM_EN=0x{mode:02X}  (-f + -if given to both) ===")
@@ -867,6 +884,25 @@ def main() -> int:
                                   "frames_per_s": round(len(r.frames) / r.seconds, 2) if r.seconds > 0 else None}
         report["legs"][leg] = legrep
         if len(sides) < 2:
+            for side, r in sides.items():
+                single_structure(leg, side, r)
+                tag = 0 if mode == 1 else IMP_TAG
+                compared = differing = unidentified = 0
+                for frame in r.frames:
+                    arrays = ([decode_normal(frame.words, frame.phases)] if mode == 1 else
+                              decode_impedance(frame.words, frame.phases, mode & 1))
+                    for arr in arrays:
+                        img = to_elec_image(arr, cell if side == "sw" else None)
+                        ff, _ = file_frame_of(img, tag)
+                        if ff is None:
+                            unidentified += 1
+                            continue
+                        n, d, _ = compare_defined(img, expected_image(tag, ff))
+                        compared += n
+                        differing += d
+                single_check(leg, "semantic/reports_expected_file",
+                             compared > 0 and differing == 0 and unidentified == 0,
+                             f"{compared} samples; {differing} differences; {unidentified} unidentified images")
             return
         sw, rtl = sides["sw"], sides["rtl"]
 
@@ -969,6 +1005,18 @@ def main() -> int:
                                   "frames_per_s": round(len(r.frames) / r.seconds, 2) if r.seconds > 0 else None}
         report["legs"][leg] = legrep
         if len(sides) < 2:
+            for side, (r, measurements) in sides.items():
+                single_structure(leg, side, r)
+                for lane in INJECT_LANES:
+                    for row in INJECT_ROWS:
+                        chain_row = 63 - row
+                        for ch in range(4):
+                            measured = measurements.get((ch, lane, row))
+                            want = model_swing_counts(ch, chain_row, lane)
+                            single_check(leg, f"pixel/leg{ch + 5}_lane{lane}_row{row}",
+                                         measured is not None and measured[0] == chain_row and
+                                         abs(measured[1] - want) <= 1,
+                                         f"measured={measured}; expected group={chain_row}, swing={want}")
             return
         (sw, swm), (rtl, rtlm) = sides["sw"], sides["rtl"]
 

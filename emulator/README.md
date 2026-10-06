@@ -44,6 +44,18 @@ about a minute; the RTL emulator produces 6 frames in ~1 s in normal mode.
 Flags: `--legs normal,imp_even,imp_odd,inject` (default all four), `--frames N`, `--strict` (ignore the known list),
 `--sw-only` / `--rtl-only` for smoke-testing one side, `--out report.json`.
 
+Single-backend mode checks launch, tail pings, frame structure/CRC, sample-file
+contents, and impedance injection against the model. It does not claim agreement
+with an absent second backend. Injection stops/drains between dwells, so those
+intentional counter gaps are not tested as one continuous stream.
+
+The Linux C backend in `~/hardware-emulator` can run these same tests. Build
+`ionm-emulator.c` with `gcc -std=c89 -pedantic -Wall -O2 ... -lpthread -lm`,
+name the isolated output `ionm_emulator`, then use `--release-dir DIR --sw-only`
+for this script or `--exe DIR/ionm_emulator` for `test_sample_rate.py`,
+`test_ber_stream.py`, `test_slow_host.py`, and `test_oob.py`. This exercises
+the backend through sockets, not FunctionFS, Pi throughput, or FTDI drivers.
+
 The last lines are the same sentinels the SV benches emit
 (`RESULTS: N passed, M failed` / `STATUS: PASS|FAIL`), so the result contract
 tooling can score it, preceded by a `THROUGHPUT:` line - wall-clock frames/s each
