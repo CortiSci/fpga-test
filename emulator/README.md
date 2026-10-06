@@ -141,10 +141,12 @@ only once the two emulators were made to agree on everything around it.
 ## Output sample rate
 
 `python -B fpga-test/emulator/test_sample_rate.py [--exe PATH]` checks normal
-four-leg telemetry against a monotonic wall clock. Each frame contains one
-sample per sensor, so 2500 frames/s means 2500 samples/s per sensor. Three
-successive 2-second windows must each fall within 5% of 2500; frame counters
-must be continuous. The tolerance allows OS scheduling and transport batching,
-not a different configured rate. The test takes about seven seconds, uses a
+four-leg telemetry against a monotonic wall clock. Each normal-mode frame contains
+one sample per sensor, so 2500 frames/s means 2500 samples/s per sensor. Two
+2-second steady windows, before and after a 1.2-second actual reader stall and
+2-second recovery, must fall within 5% of 2500. Buffered recovery bursts and
+counter gaps are allowed, as in RTL; duplicate/backward counters and total
+overproduction across the stall/recovery fail. The tolerance allows scheduling,
+not a different configured rate. The test takes about eight seconds, uses a
 private endpoint and looping sample fixture, and leaves interactive emulators
 alone. It is registered as the host target `emulator_sample_rate` (not RTL).

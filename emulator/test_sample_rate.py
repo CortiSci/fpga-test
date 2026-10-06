@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """Measure delivered normal telemetry: 2500 full-grid frames/s (per-sensor Hz).
 
-Three independent 2 s windows, after 0.5 s warmup, must each be within 5%.
-This is a wall-clock integration test, not a frame-counter speed estimate:
-missing/repeated counters also fail. OS/pipe batching is allowed. A unique
-endpoint and looping one-frame fixture isolate this from interactive emulators.
+Two steady 2 s windows must be within 5%; between them pause the actual reader
+for 1.2 s and allow 2 s of catch-up. RTL permits buffered bursts and drops under
+backpressure. Total delivery across the stall/recovery must not exceed elapsed
+time's sample budget. Counter gaps are allowed; repeated/backward counters fail.
+A unique endpoint isolates this from interactive emulators.
 Run: python -B fpga-test/emulator/test_sample_rate.py [--exe PATH]
 """
 import argparse
@@ -33,12 +34,19 @@ def main():
     samples = []
     lock = threading.Lock()
     errors = []
+    pause = threading.Event()
+    paused = threading.Event()
+    resume = threading.Event()
 
     def reader():
         # Consume telemetry immediately, timestamp at the transport boundary,
         # and keep only metadata. Commands still use the existing response queue.
         try:
             while not pipe._stop.is_set():
+                if pause.is_set():
+                    paused.set()
+                    resume.wait(5)
+                    pause.clear()
                 hdr = pipe._read_exact(2)
                 if hdr is None:
                     return
@@ -71,16 +79,32 @@ def main():
             dx.Host(pipe, 2.0, lambda _: None).bringup_and_run(1)
             time.sleep(0.5)
             start = time.perf_counter()
-            time.sleep(6.1)
+            time.sleep(2)
+            pause.set()
+            if not paused.wait(2):
+                raise RuntimeError('reader did not acknowledge stall')
+            time.sleep(1.2)
+            recovery = time.perf_counter()
+            resume.set()
+            time.sleep(2)
+            steady = time.perf_counter()
+            time.sleep(2.1)
+            end = steady + 2
             with lock:
-                captured = [s for s in samples if start <= s[0] < start + 6]
-            for i in range(3):
-                count = sum(start + 2*i <= s[0] < start + 2*(i+1) for s in captured)
+                captured = [s for s in samples if start <= s[0] < end]
+            for label, window in [('before stall', start), ('after recovery', steady)]:
+                count = sum(window <= s[0] < window + 2 for s in captured)
                 rate = count / 2
-                check(f'window {i+1}: 2500 samples/s per sensor', 2375 <= rate <= 2625,
+                check(f'{label}: 2500 samples/s per sensor', 2375 <= rate <= 2625,
                       f'{rate:.1f} frames/s (5% timing tolerance)')
-            check('continuous delivered frame counters', len(captured) > 1 and
-                  all(((b[1] - a[1]) & 0x1fffffff) == 1 for a, b in zip(captured, captured[1:])),
+            catchup = sum(recovery <= s[0] < steady for s in captured) / (steady - recovery)
+            print(f'INFO: catch-up delivery {catchup:.1f} frames/s; buffered bursts are permitted')
+            check('no overproduction across stall and recovery',
+                  len(captured) <= 2500 * (end - start) * 1.05,
+                  f'{len(captured)} frames in {end-start:.3f}s (includes stopped reader)')
+            check('no repeated or backward frame counters', len(captured) > 1 and
+                  all(0 < ((b[1] - a[1]) & 0x1fffffff) < 0x10000000
+                      for a, b in zip(captured, captured[1:])),
                   f'{len(captured)} frames')
             check('valid telemetry headers and live reader', bool(captured) and
                   all(s[2] for s in captured) and not errors and pipe._thr.is_alive() and proc.poll() is None,
@@ -88,6 +112,7 @@ def main():
         except Exception as exc:
             check('capture completed', False, str(exc))
         finally:
+            resume.set()
             # Kill only this test's process; unblock its reader before closing.
             if proc is not None:
                 proc.kill()
