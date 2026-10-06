@@ -125,3 +125,14 @@ from both emulators (2048/2048 each); CRC valid on both; phase 0 on both.
 
 The last row is the payoff: it is an RTL bug that nothing else caught, visible
 only once the two emulators were made to agree on everything around it.
+
+## Output sample rate
+
+`python -B fpga-test/emulator/test_sample_rate.py [--exe PATH]` checks normal
+four-leg telemetry against a monotonic wall clock. Each frame contains one
+sample per sensor, so 2500 frames/s means 2500 samples/s per sensor. Three
+successive 2-second windows must each fall within 5% of 2500; frame counters
+must be continuous. The tolerance allows OS scheduling and transport batching,
+not a different configured rate. The test takes about seven seconds, uses a
+private endpoint and looping sample fixture, and leaves interactive emulators
+alone. It is registered as the host target `emulator_sample_rate` (not RTL).
