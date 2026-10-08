@@ -215,3 +215,47 @@ Conclusion: the reported all-disabled failure after 10–15 sensors remains
 unreproduced. These results do not establish that a race was found or fixed.
 Next useful comparison is the contractor client's exact read/stop/drain and
 pixel-write sequence, especially overlapped reads and cancellation.
+
+### Tagged release: reproducible overlapped-read cancellation failure
+
+Fetched origin tags on October 8. The newest tag by creation date is
+`cortipix-2026-10-06`, commit `35d77ee8cde8c029cf35d8fe92b39124ccf802b0`.
+The misleadingly named `cortipix-2026-10-09` tag is an older September snapshot.
+Built the October 6 emulator and matching shim in Release from a clean detached
+worktree. Both synchronous impedance runs passed: 512 measurements at four
+frames per capture, and 512 at 50 ms dwell. No extra post-capture delay.
+
+`probe_shim_overlapped_abort.py` DOES reproduce a separate cancellation defect:
+
+1. Connect to a private, idle emulator; configure a 5000 ms read timeout.
+2. Initialize two independent OVERLAPPED structures and buffers.
+3. Submit the first eight-byte read, wait 50 ms, submit the second, wait 50 ms.
+4. Confirm both events remain pending, then call FT_AbortPipe on endpoint 0x82.
+5. Expect both read events to complete; each is given a 250 ms wait.
+
+```powershell
+python -B fpga-test/emulator/probe_shim_overlapped_abort.py --exe out/tag-race-build/emulator/Release/ionm_emulator.exe --shim out/tag-race-build/shim/Release/FTD3XX.dll --out out/abort-two.json
+```
+
+On the tagged DLL, AbortPipe returns success but both waits time out: **3/3
+runs failed**, exit 1. With `--reads 1`, the control passes and abort completes
+in 0.064 ms. The newer October 8 shim also fails with two reads, completing the
+first but leaving the second pending. Binary hashes and actual results are in
+`tagged_impedance_probe_20261008.json`. This manual probe is not in CI.
+
+The tagged implementation registers `active_read_thread` BEFORE acquiring
+`rx_mu`. Read A holds the mutex and blocks in ReadFile; read B overwrites that
+thread handle then waits for the mutex. AbortPipe attempts to cancel B, which
+has no pending ReadFile, leaving A blocked. Closing the private emulator wakes
+the workers during cleanup; the probe never frees a pending read's buffers.
+
+Also observed: the shim returns FT_IO_ERROR (4) when it launches an overlapped
+worker, even though the worker remains live. The probe deliberately retains
+those operations and their buffers. This is an API-contract concern, not an
+indication that the test's reads never started.
+
+This confirms an asynchronous cancellation defect, **not** the cause of the
+contractor's all-disabled impedance readings. Those still have not been
+reproduced. Establishing causality requires confirming that the client submits
+overlapping reads and aborts them during the failing scan. No fix was applied
+to either the tagged source or the working shim during this investigation.

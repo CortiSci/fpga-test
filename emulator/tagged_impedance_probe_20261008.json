@@ -1,0 +1,165 @@
+{
+    "date":  "2026-10-08",
+    "runs":  [
+                 {
+                     "result":  {
+                                    "reads":  1,
+                                    "pending_before_abort":  [
+                                                                 258
+                                                             ],
+                                    "read_return_statuses":  [
+                                                                 4
+                                                             ],
+                                    "abort_status":  0,
+                                    "completion_wait_results":  [
+                                                                    0
+                                                                ],
+                                    "elapsed_ms":  0.06350001785904169,
+                                    "passed":  true
+                                },
+                     "file":  "tag-abort-one.json"
+                 },
+                 {
+                     "result":  {
+                                    "reads":  2,
+                                    "pending_before_abort":  [
+                                                                 258,
+                                                                 258
+                                                             ],
+                                    "read_return_statuses":  [
+                                                                 4,
+                                                                 4
+                                                             ],
+                                    "abort_status":  0,
+                                    "completion_wait_results":  [
+                                                                    258,
+                                                                    258
+                                                                ],
+                                    "elapsed_ms":  512.4464000109583,
+                                    "passed":  false
+                                },
+                     "file":  "tag-abort-two-repeat.json"
+                 },
+                 {
+                     "result":  {
+                                    "reads":  2,
+                                    "pending_before_abort":  [
+                                                                 258,
+                                                                 258
+                                                             ],
+                                    "read_return_statuses":  [
+                                                                 4,
+                                                                 4
+                                                             ],
+                                    "abort_status":  0,
+                                    "completion_wait_results":  [
+                                                                    258,
+                                                                    258
+                                                                ],
+                                    "elapsed_ms":  526.8755999859422,
+                                    "passed":  false
+                                },
+                     "file":  "tag-abort-two-repeat2.json"
+                 },
+                 {
+                     "result":  {
+                                    "reads":  2,
+                                    "pending_before_abort":  [
+                                                                 258,
+                                                                 258
+                                                             ],
+                                    "read_return_statuses":  [
+                                                                 4,
+                                                                 4
+                                                             ],
+                                    "abort_status":  0,
+                                    "completion_wait_results":  [
+                                                                    258,
+                                                                    258
+                                                                ],
+                                    "elapsed_ms":  512.8827000153251,
+                                    "passed":  false
+                                },
+                     "file":  "tag-abort-two.json"
+                 },
+                 {
+                     "result":  {
+                                    "exe":  "C:\\Users\\Jeremy\\IONM-A-FPGA\\out\\tag-race-build\\emulator\\Release\\ionm_emulator.exe",
+                                    "shim":  "out/tag-race-build/shim/Release/FTD3XX.dll",
+                                    "leg":  null,
+                                    "dwell_ms":  50.0,
+                                    "delay_ms":  0,
+                                    "measurements":  512,
+                                    "expected_measurements":  512,
+                                    "error":  "",
+                                    "failures":  [
+
+                                                 ],
+                                    "seconds":  57.597259759902954,
+                                    "frames":  16143,
+                                    "bad_crc":  0
+                                },
+                     "file":  "tag-shim-dwell50.json"
+                 },
+                 {
+                     "result":  {
+                                    "exe":  "C:\\Users\\Jeremy\\IONM-A-FPGA\\out\\tag-race-build\\emulator\\Release\\ionm_emulator.exe",
+                                    "shim":  "out/tag-race-build/shim/Release/FTD3XX.dll",
+                                    "leg":  null,
+                                    "dwell_ms":  0,
+                                    "delay_ms":  0,
+                                    "measurements":  512,
+                                    "expected_measurements":  512,
+                                    "error":  "",
+                                    "failures":  [
+
+                                                 ],
+                                    "seconds":  34.673203229904175,
+                                    "frames":  512,
+                                    "bad_crc":  0
+                                },
+                     "file":  "tag-shim-fast.json"
+                 },
+                 {
+                     "result":  {
+                                    "reads":  2,
+                                    "pending_before_abort":  [
+                                                                 258,
+                                                                 258
+                                                             ],
+                                    "read_return_statuses":  [
+                                                                 4,
+                                                                 4
+                                                             ],
+                                    "abort_status":  0,
+                                    "completion_wait_results":  [
+                                                                    0,
+                                                                    258
+                                                                ],
+                                    "elapsed_ms":  262.2311000013724,
+                                    "passed":  false
+                                },
+                     "file":  "current-abort-two.json"
+                 }
+             ],
+    "commit":  "35d77ee8cde8c029cf35d8fe92b39124ccf802b0",
+    "tag":  "cortipix-2026-10-06",
+    "binaries":  [
+                     {
+                         "Path":  "C:\\Users\\Jeremy\\IONM-A-FPGA\\out\\tag-race-build\\emulator\\Release\\ionm_emulator.exe",
+                         "Hash":  "3A0C3B1B4FB772143D1FEC40D479E39BD6ACEF88A6AD4108704E1F7452C37032"
+                     },
+                     {
+                         "Path":  "C:\\Users\\Jeremy\\IONM-A-FPGA\\out\\tag-race-build\\shim\\Release\\FTD3XX.dll",
+                         "Hash":  "ADCC482BBBF26DC95206D7B7A2BD9F370C99F13D279D9B0DC9B9800823121945"
+                     },
+                     {
+                         "Path":  "C:\\Users\\Jeremy\\IONM-A-FPGA\\out\\emulator-endre-release\\emulator\\Release\\ionm_emulator.exe",
+                         "Hash":  "5C8D312819A9E1C59BAB70690D5630B9351C0D91A227F8F35AB5DC9322BB6F70"
+                     },
+                     {
+                         "Path":  "C:\\Users\\Jeremy\\IONM-A-FPGA\\out\\emulator-endre-release\\shim\\Release\\FTD3XX.dll",
+                         "Hash":  "2B5962D4005E55566E53EDAD4DA28F6B0EA7106C7FF2F8B14DF1FB9F24D453DA"
+                     }
+                 ]
+}
