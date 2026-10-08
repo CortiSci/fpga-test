@@ -19,6 +19,7 @@ def main():
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         cwd=str(Path(args.exe).resolve().parent), creationflags=subprocess.CREATE_NO_WINDOW)
     first, second = c.c_void_p(), c.c_void_p(1234)
+    second_opened = False
     failures = 0
     def check(name, ok):
         nonlocal failures
@@ -37,6 +38,7 @@ def main():
         if not first.value:
             return 1
         status = ft.FT_Create(None, 0, c.byref(second))
+        second_opened = status == 0
         check('second client rejected with null handle', status != 0 and second.value is None)
         check('owner still receives responses', command())
         ft.FT_Close(first)
@@ -46,7 +48,7 @@ def main():
     finally:
         if first.value:
             ft.FT_Close(first)
-        if second.value not in (None, 1234):
+        if second_opened and second.value:
             ft.FT_Close(second)
         proc.kill()
         proc.wait(timeout=5)

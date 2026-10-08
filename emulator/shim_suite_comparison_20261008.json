@@ -1,0 +1,416 @@
+{
+  "old_tag": "cortipix-2026-10-06",
+  "old_commit": "35d77ee8cde8c029cf35d8fe92b39124ccf802b0",
+  "fixed_commit": "f6ee7f9",
+  "binary_sha256": {
+    "out\\tag-race-build\\emulator\\Release\\ionm_emulator.exe": "3a0c3b1b4fb772143d1fec40d479e39bd6acef88a6ad4108704e1f7452c37032",
+    "out\\tag-race-build\\shim\\Release\\FTD3XX.dll": "adcc482bbbf26dc95206d7b7a2bd9f370c99f13d279d9b0dc9b9800823121945",
+    "out\\current-shim-build\\emulator\\Release\\ionm_emulator.exe": "7c1bf6ce1b979a2556f5f7809543cd8c0c121a64861e0d9f50e543d6abdef37d",
+    "out\\current-shim-build\\shim\\Release\\FTD3XX.dll": "8f90d5a451d6579f571734a3f6406a8cca128239d1c75c84b41e76e207a422f0"
+  },
+  "old": {
+    "rtl_ref": null,
+    "ok": false,
+    "any_fail": true,
+    "exit_bad": true,
+    "headline": "0/3 targets pass, 1 assertions pass / 9 fail, REGRESSION vs baseline",
+    "reasons": [
+      "emulator_shim_race: FAIL with no baseline entry (n_fail=4)",
+      "emulator_shim_timeouts: FAIL with no baseline entry (n_fail=4)",
+      "emulator_shim_connection: FAIL with no baseline entry (n_fail=1)"
+    ],
+    "targets_pass": 0,
+    "targets_total": 3,
+    "targets_skipped": [],
+    "assertions_pass": 1,
+    "assertions_fail": 9,
+    "rows": [
+      {
+        "target": "emulator_shim_race",
+        "status": "FAIL",
+        "n_pass": 0,
+        "n_fail": 4,
+        "failures": [
+          "simulator exited with code 1"
+        ],
+        "disposition": "REQUIRED-PASS",
+        "release_blocking": true,
+        "seconds": 11.8,
+        "log": "C:/Users/Jeremy/IONM-A-FPGA/out/impedance-race-investigation/logs/emulator_shim_race.log",
+        "summary": "0 passed, 4 failed - FAIL",
+        "contract_valid": true,
+        "contract_note": null
+      },
+      {
+        "target": "emulator_shim_timeouts",
+        "status": "FAIL",
+        "n_pass": 1,
+        "n_fail": 4,
+        "failures": [
+          "simulator exited with code 1"
+        ],
+        "disposition": "REQUIRED-PASS",
+        "release_blocking": true,
+        "seconds": 3.9,
+        "log": "C:/Users/Jeremy/IONM-A-FPGA/out/impedance-race-investigation/logs/emulator_shim_timeouts.log",
+        "summary": "1 passed, 4 failed - FAIL",
+        "contract_valid": true,
+        "contract_note": null
+      },
+      {
+        "target": "emulator_shim_connection",
+        "status": "FAIL",
+        "n_pass": 0,
+        "n_fail": 1,
+        "failures": [
+          "simulator exited with code 1"
+        ],
+        "disposition": "REQUIRED-PASS",
+        "release_blocking": true,
+        "seconds": 5.5,
+        "log": "C:/Users/Jeremy/IONM-A-FPGA/out/impedance-race-investigation/logs/emulator_shim_connection.log",
+        "summary": "0 passed, 1 failed - FAIL",
+        "contract_valid": true,
+        "contract_note": null
+      }
+    ]
+  },
+  "new": {
+    "rtl_ref": null,
+    "ok": true,
+    "any_fail": false,
+    "exit_bad": false,
+    "headline": "3/3 targets pass, 10 assertions pass / 0 fail, no regressions vs baseline",
+    "reasons": [],
+    "targets_pass": 3,
+    "targets_total": 3,
+    "targets_skipped": [],
+    "assertions_pass": 10,
+    "assertions_fail": 0,
+    "rows": [
+      {
+        "target": "emulator_shim_race",
+        "status": "PASS",
+        "n_pass": 4,
+        "n_fail": 0,
+        "failures": [],
+        "disposition": "REQUIRED-PASS",
+        "release_blocking": true,
+        "seconds": 1.1,
+        "log": "C:/Users/Jeremy/IONM-A-FPGA/out/impedance-race-investigation/logs/emulator_shim_race.log",
+        "summary": "4 passed, 0 failed - PASS",
+        "contract_valid": true,
+        "contract_note": null
+      },
+      {
+        "target": "emulator_shim_timeouts",
+        "status": "PASS",
+        "n_pass": 5,
+        "n_fail": 0,
+        "failures": [],
+        "disposition": "REQUIRED-PASS",
+        "release_blocking": true,
+        "seconds": 0.8,
+        "log": "C:/Users/Jeremy/IONM-A-FPGA/out/impedance-race-investigation/logs/emulator_shim_timeouts.log",
+        "summary": "5 passed, 0 failed - PASS",
+        "contract_valid": true,
+        "contract_note": null
+      },
+      {
+        "target": "emulator_shim_connection",
+        "status": "PASS",
+        "n_pass": 1,
+        "n_fail": 0,
+        "failures": [],
+        "disposition": "REQUIRED-PASS",
+        "release_blocking": true,
+        "seconds": 5.4,
+        "log": "C:/Users/Jeremy/IONM-A-FPGA/out/impedance-race-investigation/logs/emulator_shim_connection.log",
+        "summary": "1 passed, 0 failed - PASS",
+        "contract_valid": true,
+        "contract_note": null
+      }
+    ]
+  },
+  "old_details": {
+    "exe": "C:\\Users\\Jeremy\\IONM-A-FPGA\\out\\tag-race-build\\emulator\\Release\\ionm_emulator.exe",
+    "shim": "C:\\Users\\Jeremy\\IONM-A-FPGA\\out\\tag-race-build\\shim\\Release\\FTD3XX.dll",
+    "results": [
+      {
+        "name": "abort-direct-0ms",
+        "passed": false,
+        "returncode": 1,
+        "stdout": "{\"reads\": 2, \"mode2\": false, \"delay_ms\": 0.0, \"pending_before_abort\": [258, 258], \"cancelled\": [], \"recovery\": false, \"read_return_statuses\": [4, 4], \"abort_status\": 0, \"completion_wait_results\": [0, 258], \"elapsed_ms\": 250.7153000042308, \"passed\": false}\n",
+        "stderr": "[SHIM][INFO] FT_Create: connecting to \\\\.\\pipe\\IONM_ABORT_RACE_29188_CTRL ...\n[SHIM][INFO] FT_Create: connected (handle=0000021077F7A5A0)\n[SHIM][INFO] FT_Close\n",
+        "seconds": 0.3975599000114016
+      },
+      {
+        "name": "abort-direct-50ms",
+        "passed": false,
+        "returncode": 1,
+        "stdout": "{\"reads\": 2, \"mode2\": false, \"delay_ms\": 50.0, \"pending_before_abort\": [258, 258], \"cancelled\": [], \"recovery\": false, \"read_return_statuses\": [4, 4], \"abort_status\": 0, \"completion_wait_results\": [258, 258], \"elapsed_ms\": 511.54430001042783, \"passed\": false}\n",
+        "stderr": "[SHIM][INFO] FT_Create: connecting to \\\\.\\pipe\\IONM_ABORT_RACE_16768_CTRL ...\n[SHIM][INFO] FT_Create: connected (handle=0000028190FBE980)\n[SHIM][INFO] FT_Close\n",
+        "seconds": 0.7689767999981996
+      },
+      {
+        "name": "abort-buffered-0ms",
+        "passed": false,
+        "returncode": 1,
+        "stdout": "{\"reads\": 2, \"mode2\": true, \"delay_ms\": 0.0, \"pending_before_abort\": [258, 258], \"cancelled\": [], \"recovery\": false, \"read_return_statuses\": [4, 4], \"abort_status\": 0, \"completion_wait_results\": [258, 258], \"elapsed_ms\": 503.12949999351986, \"passed\": false}\n",
+        "stderr": "[SHIM][INFO] FT_Create: connecting to \\\\.\\pipe\\IONM_ABORT_RACE_29092_CTRL ...\n[SHIM][INFO] FT_Create: Mode 2 (FTD-accurate) enabled\n[SHIM][INFO] FT_Create: connected (handle=00000124DA008F10)\n[SHIM][INFO] FT_Close\n",
+        "seconds": 5.1524870000139344
+      },
+      {
+        "name": "abort-buffered-50ms",
+        "passed": false,
+        "returncode": 1,
+        "stdout": "{\"reads\": 2, \"mode2\": true, \"delay_ms\": 50.0, \"pending_before_abort\": [258, 258], \"cancelled\": [], \"recovery\": false, \"read_return_statuses\": [4, 4], \"abort_status\": 0, \"completion_wait_results\": [258, 258], \"elapsed_ms\": 516.1803000082728, \"passed\": false}\n",
+        "stderr": "[SHIM][INFO] FT_Create: connecting to \\\\.\\pipe\\IONM_ABORT_RACE_17768_CTRL ...\n[SHIM][INFO] FT_Create: Mode 2 (FTD-accurate) enabled\n[SHIM][INFO] FT_Create: connected (handle=0000013BB8BC6260)\n[SHIM][INFO] FT_Close\n",
+        "seconds": 5.229040999984136
+      },
+      {
+        "name": "idle",
+        "passed": false,
+        "returncode": 1,
+        "stdout": "{\"scenario\": \"idle\", \"status\": 4, \"elapsed_ms\": 414.81709998333827, \"recovery\": false, \"passed\": false}\n",
+        "stderr": "[SHIM][INFO] FT_Create: connecting to \\\\.\\pipe\\IONM_DEADLINE_16208_CTRL ...\n[SHIM][INFO] FT_Create: connected (handle=000001C866ADBB10)\n[SHIM][INFO] FT_Close\n",
+        "seconds": 0.5052929999947082
+      },
+      {
+        "name": "prefix",
+        "passed": false,
+        "returncode": 1,
+        "stdout": "{\"scenario\": \"prefix\", \"status\": 4, \"elapsed_ms\": 403.7185000197496, \"recovery\": false, \"passed\": false}\n",
+        "stderr": "[SHIM][INFO] FT_Create: connecting to \\\\.\\pipe\\IONM_DEADLINE_19584_CTRL ...\n[SHIM][INFO] FT_Create: connected (handle=0000020602752DF0)\n[SHIM][INFO] FT_Close\n",
+        "seconds": 0.48856669999076985
+      },
+      {
+        "name": "payload",
+        "passed": false,
+        "returncode": 1,
+        "stdout": "{\"scenario\": \"payload\", \"status\": 4, \"elapsed_ms\": 407.70189999602735, \"recovery\": false, \"passed\": false}\n",
+        "stderr": "[SHIM][INFO] FT_Create: connecting to \\\\.\\pipe\\IONM_DEADLINE_6272_CTRL ...\n[SHIM][INFO] FT_Create: connected (handle=00000130A46C7F00)\n[SHIM][INFO] FT_Close\n",
+        "seconds": 0.5084487000131048
+      },
+      {
+        "name": "buffered-idle",
+        "passed": true,
+        "returncode": 0,
+        "stdout": "{\"scenario\": \"buffered-idle\", \"status\": 19, \"elapsed_ms\": 45.89380000834353, \"recovery\": true, \"passed\": true}\n",
+        "stderr": "[SHIM][INFO] FT_Create: connecting to \\\\.\\pipe\\IONM_DEADLINE_6020_CTRL ...\n[SHIM][INFO] FT_Create: Mode 2 (FTD-accurate) enabled\n[SHIM][INFO] FT_Create: connected (handle=0000022C1BD07330)\n[SHIM][INFO] FT_Close\n",
+        "seconds": 0.1627454000117723
+      },
+      {
+        "name": "buffered-abort",
+        "passed": false,
+        "returncode": 1,
+        "stdout": "{\"scenario\": \"buffered-abort\", \"status\": 4, \"elapsed_ms\": 2001.2008000048809, \"recovery\": false, \"passed\": false}\n",
+        "stderr": "[SHIM][INFO] FT_Create: connecting to \\\\.\\pipe\\IONM_DEADLINE_21780_CTRL ...\n[SHIM][INFO] FT_Create: Mode 2 (FTD-accurate) enabled\n[SHIM][INFO] FT_Create: connected (handle=000001F672B913A0)\n[SHIM][INFO] FT_Close\n",
+        "seconds": 2.0905264999892097
+      },
+      {
+        "name": "failed-open-handle",
+        "passed": false,
+        "returncode": 1,
+        "stdout": "PASS first client opens\nFAIL second client rejected with null handle\nPASS owner still receives responses\nPASS reconnect after close\nPASS reconnected client receives responses\n",
+        "stderr": "[SHIM][INFO] FT_Create: connecting to \\\\.\\pipe\\IONM_CONNECTION_29072_CTRL ...\n[SHIM][INFO] FT_Create: connected (handle=00000264D6719030)\n[SHIM][INFO] FT_Create: connecting to \\\\.\\pipe\\IONM_CONNECTION_29072_CTRL ...\n[SHIM][ERR] FT_Create: cannot open CTRL pipe (231)\n[SHIM][INFO] FT_Close\n[SHIM][INFO] FT_Create: connecting to \\\\.\\pipe\\IONM_CONNECTION_29072_CTRL ...\n[SHIM][INFO] FT_Create: connected (handle=00000264D6717270)\n[SHIM][INFO] FT_Close\n",
+        "seconds": 5.340187499998137
+      }
+    ]
+  },
+  "new_details": {
+    "exe": "C:\\Users\\Jeremy\\IONM-A-FPGA\\out\\current-shim-build\\emulator\\Release\\ionm_emulator.exe",
+    "shim": "C:\\Users\\Jeremy\\IONM-A-FPGA\\out\\current-shim-build\\shim\\Release\\FTD3XX.dll",
+    "results": [
+      {
+        "name": "abort-direct-0ms",
+        "passed": true,
+        "returncode": 0,
+        "stdout": "{\"reads\": 2, \"mode2\": false, \"delay_ms\": 0.0, \"pending_before_abort\": [258, 258], \"cancelled\": [true, true], \"recovery\": true, \"read_return_statuses\": [4, 4], \"abort_status\": 0, \"completion_wait_results\": [0, 0], \"elapsed_ms\": 0.3797000099439174, \"passed\": true}\n",
+        "stderr": "[SHIM][INFO] FT_Create: connecting to \\\\.\\pipe\\IONM_ABORT_RACE_25896_CTRL ...\n[SHIM][INFO] FT_Create: connected (handle=000001400A1C30D0)\n[SHIM][INFO] FT_Close\n",
+        "seconds": 0.1471202000102494
+      },
+      {
+        "name": "abort-direct-50ms",
+        "passed": true,
+        "returncode": 0,
+        "stdout": "{\"reads\": 2, \"mode2\": false, \"delay_ms\": 50.0, \"pending_before_abort\": [258, 258], \"cancelled\": [true, true], \"recovery\": true, \"read_return_statuses\": [4, 4], \"abort_status\": 0, \"completion_wait_results\": [0, 0], \"elapsed_ms\": 0.07050001295283437, \"passed\": true}\n",
+        "stderr": "[SHIM][INFO] FT_Create: connecting to \\\\.\\pipe\\IONM_ABORT_RACE_16296_CTRL ...\n[SHIM][INFO] FT_Create: connected (handle=000001A25701F8E0)\n[SHIM][INFO] FT_Close\n",
+        "seconds": 0.25804640000569634
+      },
+      {
+        "name": "abort-buffered-0ms",
+        "passed": true,
+        "returncode": 0,
+        "stdout": "{\"reads\": 2, \"mode2\": true, \"delay_ms\": 0.0, \"pending_before_abort\": [258, 258], \"cancelled\": [true, true], \"recovery\": true, \"read_return_statuses\": [4, 4], \"abort_status\": 0, \"completion_wait_results\": [0, 0], \"elapsed_ms\": 0.3299000090919435, \"passed\": true}\n",
+        "stderr": "[SHIM][INFO] FT_Create: connecting to \\\\.\\pipe\\IONM_ABORT_RACE_6820_CTRL ...\n[SHIM][INFO] FT_Create: Mode 2 (FTD-accurate) enabled\n[SHIM][INFO] FT_Create: connected (handle=000002C1E27F4A30)\n[SHIM][INFO] FT_Close\n",
+        "seconds": 0.15149940000264905
+      },
+      {
+        "name": "abort-buffered-50ms",
+        "passed": true,
+        "returncode": 0,
+        "stdout": "{\"reads\": 2, \"mode2\": true, \"delay_ms\": 50.0, \"pending_before_abort\": [258, 258], \"cancelled\": [true, true], \"recovery\": true, \"read_return_statuses\": [4, 4], \"abort_status\": 0, \"completion_wait_results\": [0, 0], \"elapsed_ms\": 0.086499989265576, \"passed\": true}\n",
+        "stderr": "[SHIM][INFO] FT_Create: connecting to \\\\.\\pipe\\IONM_ABORT_RACE_7680_CTRL ...\n[SHIM][INFO] FT_Create: Mode 2 (FTD-accurate) enabled\n[SHIM][INFO] FT_Create: connected (handle=000001C4B87B5FD0)\n[SHIM][INFO] FT_Close\n",
+        "seconds": 0.24392909999005497
+      },
+      {
+        "name": "idle",
+        "passed": true,
+        "returncode": 0,
+        "stdout": "{\"scenario\": \"idle\", \"status\": 19, \"elapsed_ms\": 47.28879997855984, \"recovery\": true, \"passed\": true}\n",
+        "stderr": "[SHIM][INFO] FT_Create: connecting to \\\\.\\pipe\\IONM_DEADLINE_15184_CTRL ...\n[SHIM][INFO] FT_Create: connected (handle=000001D2C11C2F80)\n[SHIM][INFO] FT_Close\n",
+        "seconds": 0.1467959999863524
+      },
+      {
+        "name": "prefix",
+        "passed": true,
+        "returncode": 0,
+        "stdout": "{\"scenario\": \"prefix\", \"status\": 19, \"elapsed_ms\": 49.05880001024343, \"recovery\": true, \"passed\": true}\n",
+        "stderr": "[SHIM][INFO] FT_Create: connecting to \\\\.\\pipe\\IONM_DEADLINE_6480_CTRL ...\n[SHIM][INFO] FT_Create: connected (handle=000002030FC2E540)\n[SHIM][INFO] FT_Close\n",
+        "seconds": 0.12524389999452978
+      },
+      {
+        "name": "payload",
+        "passed": true,
+        "returncode": 0,
+        "stdout": "{\"scenario\": \"payload\", \"status\": 19, \"elapsed_ms\": 45.31230000429787, \"recovery\": true, \"passed\": true}\n",
+        "stderr": "[SHIM][INFO] FT_Create: connecting to \\\\.\\pipe\\IONM_DEADLINE_28772_CTRL ...\n[SHIM][INFO] FT_Create: connected (handle=000001B5DBA6A990)\n[SHIM][INFO] FT_Close\n",
+        "seconds": 0.12573810000321828
+      },
+      {
+        "name": "buffered-idle",
+        "passed": true,
+        "returncode": 0,
+        "stdout": "{\"scenario\": \"buffered-idle\", \"status\": 19, \"elapsed_ms\": 46.690500021213666, \"recovery\": true, \"passed\": true}\n",
+        "stderr": "[SHIM][INFO] FT_Create: connecting to \\\\.\\pipe\\IONM_DEADLINE_4116_CTRL ...\n[SHIM][INFO] FT_Create: Mode 2 (FTD-accurate) enabled\n[SHIM][INFO] FT_Create: connected (handle=000001C8314E5880)\n[SHIM][INFO] FT_Close\n",
+        "seconds": 0.15752239999710582
+      },
+      {
+        "name": "buffered-abort",
+        "passed": true,
+        "returncode": 0,
+        "stdout": "{\"scenario\": \"buffered-abort\", \"status\": 4, \"elapsed_ms\": 47.406199999386445, \"recovery\": true, \"passed\": true}\n",
+        "stderr": "[SHIM][INFO] FT_Create: connecting to \\\\.\\pipe\\IONM_DEADLINE_9160_CTRL ...\n[SHIM][INFO] FT_Create: Mode 2 (FTD-accurate) enabled\n[SHIM][INFO] FT_Create: connected (handle=00000202827E10D0)\n[SHIM][INFO] FT_Close\n",
+        "seconds": 0.14342300000134856
+      },
+      {
+        "name": "failed-open-handle",
+        "passed": true,
+        "returncode": 0,
+        "stdout": "PASS first client opens\nPASS second client rejected with null handle\nPASS owner still receives responses\nPASS reconnect after close\nPASS reconnected client receives responses\n",
+        "stderr": "[SHIM][INFO] FT_Create: connecting to \\\\.\\pipe\\IONM_CONNECTION_9032_CTRL ...\n[SHIM][INFO] FT_Create: connected (handle=0000013B098CA040)\n[SHIM][INFO] FT_Create: connecting to \\\\.\\pipe\\IONM_CONNECTION_9032_CTRL ...\n[SHIM][ERR] FT_Create: cannot open CTRL pipe (231)\n[SHIM][INFO] FT_Close\n[SHIM][INFO] FT_Create: connecting to \\\\.\\pipe\\IONM_CONNECTION_9032_CTRL ...\n[SHIM][INFO] FT_Create: connected (handle=0000013B098CAC20)\n[SHIM][INFO] FT_Close\n",
+        "seconds": 5.356000600004336
+      }
+    ]
+  },
+  "hardware": {
+    "commit": "8cfa8bebd5b890f5733e20bbb9e5f9366d47a765",
+    "build": [
+      "gcc",
+      "-std=c89",
+      "-pedantic",
+      "-Wall",
+      "-O2",
+      "-DIONM_GIT_HASH=0x8cfa8bebul",
+      "-DIONM_GIT_DIRTY=0ul",
+      "/mnt/c/Users/Jeremy/hardware-emulator/ionm-emulator.c",
+      "-lpthread",
+      "-lm",
+      "-o",
+      "/mnt/c/Users/Jeremy/IONM-A-FPGA/out/hardware-emulator-suite-20261008/ionm_emulator"
+    ],
+    "sha256": "fac18d857dcd2dc9c48627f4c8f3092f04e6eb315b1604c8cd1a80dcbb32a4c7",
+    "results": [
+      {
+        "name": "sample_rate",
+        "returncode": 0,
+        "summary": [
+          "RESULTS: 5 passed, 0 failed",
+          "STATUS: PASS"
+        ],
+        "command": [
+          "/usr/bin/python3",
+          "-B",
+          "/mnt/c/Users/Jeremy/IONM-A-FPGA/fpga-test/emulator/test_sample_rate.py",
+          "--exe",
+          "/mnt/c/Users/Jeremy/IONM-A-FPGA/out/hardware-emulator-suite-20261008/ionm_emulator"
+        ]
+      },
+      {
+        "name": "ber",
+        "returncode": 0,
+        "summary": [
+          "RESULTS: 16 passed, 0 failed",
+          "STATUS: PASS"
+        ],
+        "command": [
+          "/usr/bin/python3",
+          "-B",
+          "/mnt/c/Users/Jeremy/IONM-A-FPGA/fpga-test/emulator/test_ber_stream.py",
+          "--exe",
+          "/mnt/c/Users/Jeremy/IONM-A-FPGA/out/hardware-emulator-suite-20261008/ionm_emulator",
+          "-v"
+        ]
+      },
+      {
+        "name": "slow_host",
+        "returncode": 0,
+        "summary": [
+          "RESULTS: 4 passed, 0 failed",
+          "STATUS: PASS"
+        ],
+        "command": [
+          "/usr/bin/python3",
+          "-B",
+          "/mnt/c/Users/Jeremy/IONM-A-FPGA/fpga-test/emulator/test_slow_host.py",
+          "--exe",
+          "/mnt/c/Users/Jeremy/IONM-A-FPGA/out/hardware-emulator-suite-20261008/ionm_emulator"
+        ]
+      },
+      {
+        "name": "protocol",
+        "returncode": 0,
+        "summary": [
+          "RESULTS: 58 passed, 0 failed",
+          "STATUS: PASS"
+        ],
+        "command": [
+          "/usr/bin/python3",
+          "-B",
+          "/mnt/c/Users/Jeremy/IONM-A-FPGA/fpga-test/emulator/diff_emulators.py",
+          "--release-dir",
+          "/mnt/c/Users/Jeremy/IONM-A-FPGA/out/hardware-emulator-suite-20261008",
+          "--sw-only",
+          "--strict",
+          "--cmd-timeout",
+          "5",
+          "--out",
+          "/mnt/c/Users/Jeremy/IONM-A-FPGA/out/hardware-emulator-suite-20261008/differential.json"
+        ]
+      },
+      {
+        "name": "oob",
+        "returncode": 0,
+        "summary": [
+          "RESULTS: 56 passed, 0 failed",
+          "STATUS: PASS"
+        ],
+        "command": [
+          "/usr/bin/python3",
+          "-B",
+          "/mnt/c/Users/Jeremy/IONM-A-FPGA/fpga-test/emulator/test_oob.py",
+          "--exe",
+          "/mnt/c/Users/Jeremy/IONM-A-FPGA/out/hardware-emulator-suite-20261008/ionm_emulator",
+          "-v"
+        ]
+      }
+    ],
+    "skips": [
+      "Windows FTD3XX shim tests",
+      "Windows integration",
+      "RTL differential",
+      "Physical Pi USB gadget"
+    ]
+  }
+}

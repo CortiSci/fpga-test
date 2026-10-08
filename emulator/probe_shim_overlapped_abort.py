@@ -1,6 +1,7 @@
-"""Manual reproducer: abort an endpoint with two pending overlapped reads.
+"""Regression helper: abort an endpoint with two pending overlapped reads.
 
-Uses a private emulator instance. Not registered in CI. No hardware access.
+Uses a private emulator instance. Called by test_shim_regressions.py in CI.
+No hardware access.
 """
 import argparse
 import ctypes as c

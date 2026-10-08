@@ -281,3 +281,47 @@ impedance measurements also passed. Results and DLL hash are saved in
 This fixes the reproduced cancellation race. It does not establish the cause
 of the contractor's all-disabled-channel symptom or change the shim's existing
 overlapped API return conventions.
+
+### Registered shim regression suite
+
+The race, timeout and failed-open regressions are now registered host targets:
+`emulator_shim_race`, `emulator_shim_timeouts`, `emulator_shim_connection`.
+They run on Windows, require a built emulator and matching FTD3XX.dll, and
+report an explicit platform skip on Linux. A dedicated Windows GitHub Actions
+workflow builds both artifacts and runs these tests on pushes/pull requests.
+Local default artifacts are under `Software Emulator/build/test_app/Release`;
+the `IONM_DUT_ROOT` override selects another built checkout.
+
+```powershell
+python -B tools/ci/run_suite.py --targets emulator_shim_race,emulator_shim_timeouts,emulator_shim_connection --jobs 1 --fail-on-any-failure
+python -B fpga-test/emulator/test_shim_regressions.py --exe PATH/ionm_emulator.exe --shim PATH/FTD3XX.dll --out results.json
+```
+
+The runner uses private pipes and bounded child processes; no physical board
+or bringup UI is involved. The deadline cases load the actual DLL against a
+controlled pipe server, so the same tests work on old and new binaries without
+changing their source. Missing/partial packets must time out and retain framing
+on retry; buffered abort must wake promptly; failed opens must clear stale handles.
+Normal local runtime is about seven seconds for all ten checks.
+
+Verified with clean Release builds of the same sources being compared:
+
+| Target | October 6 tag (35d77ee8) | Fixed commit (f6ee7f9) |
+|---|---|---|
+| Race | 0 pass / 4 fail | 4 pass / 0 fail |
+| Timeouts and recovery | 1 pass / 4 fail | 5 pass / 0 fail |
+| Failed-open handle | 0 pass / 1 fail | 1 pass / 0 fail |
+
+The buffered-idle timeout is an existing passing control, not a newly discovered
+bug. All three targets failed on the tag and passed on the fixed commit through
+the registered suite runner; these verdicts were explicitly asserted. The fixed
+build excludes unrelated uncommitted emulator/bringup edits. Detailed output,
+hashes and hardware-backend results: `shim_suite_comparison_20261008.json`.
+
+After that comparison, hardware-emulator commit `8cfa8beb` was rebuilt from its
+clean checkout under Ubuntu/WSL with GCC C89, -O2 and matching BUILD_ID defines.
+All five applicable backend suites passed: rate 5, BER 16, slow host 4,
+protocol/impedance 58, OOB 56 (139 checks total). Windows shim/integration and
+RTL differential tests do not apply to this backend-only run; no physical Pi,
+FunctionFS gadget or USB link was exercised. Full logs are in the parent repo's
+`out/hardware-emulator-suite-20261008/`; no hardware-emulator source was changed.
