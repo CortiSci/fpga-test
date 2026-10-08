@@ -259,3 +259,25 @@ contractor's all-disabled impedance readings. Those still have not been
 reproduced. Establishing causality requires confirming that the client submits
 overlapping reads and aborts them during the failing scan. No fix was applied
 to either the tagged source or the working shim during this investigation.
+
+### Cancellation fix verification
+
+The subsequent shim fix replaces the consumed-once abort flag with a read
+generation captured when FT_ReadPipe is submitted, before launching its worker.
+Abort advances the generation, so every earlier read cancels, including workers
+waiting for the receive mutex or not scheduled yet. Native read submission and
+CancelIoEx share a mutex to prevent cancellation from hitting a newer read.
+Buffered mode wakes all old-generation readers without stopping its feeder.
+
+The reproducer now verifies cancelled reads return no data and a new command/
+read succeeds afterwards. Add `--mode2` to exercise the buffered shim and
+`--delay-ms 0` to abort immediately after submission. On the fixed Release DLL,
+all 20 runs passed (five repetitions of both modes with zero/50 ms delays).
+The enhanced reproducer still fails against the unmodified October 6 tag.
+The eight timeout/partial-frame checks, five connection checks and 512
+impedance measurements also passed. Results and DLL hash are saved in
+`shim_abort_fix_20261008.json`. These checks remain manual, outside CI.
+
+This fixes the reproduced cancellation race. It does not establish the cause
+of the contractor's all-disabled-channel symptom or change the shim's existing
+overlapped API return conventions.

@@ -1,0 +1,524 @@
+{
+    "connection_checks_passed":  5,
+    "timeout_recovery_checks_passed":  8,
+    "cancellation_runs":  [
+                              {
+                                  "reads":  2,
+                                  "mode2":  true,
+                                  "delay_ms":  0.0,
+                                  "pending_before_abort":  [
+                                                               258,
+                                                               258
+                                                           ],
+                                  "cancelled":  [
+                                                    true,
+                                                    true
+                                                ],
+                                  "recovery":  true,
+                                  "read_return_statuses":  [
+                                                               4,
+                                                               4
+                                                           ],
+                                  "abort_status":  0,
+                                  "completion_wait_results":  [
+                                                                  0,
+                                                                  0
+                                                              ],
+                                  "elapsed_ms":  0.9716000058688223,
+                                  "passed":  true
+                              },
+                              {
+                                  "reads":  2,
+                                  "mode2":  true,
+                                  "delay_ms":  0.0,
+                                  "pending_before_abort":  [
+                                                               258,
+                                                               258
+                                                           ],
+                                  "cancelled":  [
+                                                    true,
+                                                    true
+                                                ],
+                                  "recovery":  true,
+                                  "read_return_statuses":  [
+                                                               4,
+                                                               4
+                                                           ],
+                                  "abort_status":  0,
+                                  "completion_wait_results":  [
+                                                                  0,
+                                                                  0
+                                                              ],
+                                  "elapsed_ms":  0.3364000003784895,
+                                  "passed":  true
+                              },
+                              {
+                                  "reads":  2,
+                                  "mode2":  true,
+                                  "delay_ms":  0.0,
+                                  "pending_before_abort":  [
+                                                               258,
+                                                               258
+                                                           ],
+                                  "cancelled":  [
+                                                    true,
+                                                    true
+                                                ],
+                                  "recovery":  true,
+                                  "read_return_statuses":  [
+                                                               4,
+                                                               4
+                                                           ],
+                                  "abort_status":  0,
+                                  "completion_wait_results":  [
+                                                                  0,
+                                                                  0
+                                                              ],
+                                  "elapsed_ms":  0.5585000035353005,
+                                  "passed":  true
+                              },
+                              {
+                                  "reads":  2,
+                                  "mode2":  true,
+                                  "delay_ms":  0.0,
+                                  "pending_before_abort":  [
+                                                               258,
+                                                               258
+                                                           ],
+                                  "cancelled":  [
+                                                    true,
+                                                    true
+                                                ],
+                                  "recovery":  true,
+                                  "read_return_statuses":  [
+                                                               4,
+                                                               4
+                                                           ],
+                                  "abort_status":  0,
+                                  "completion_wait_results":  [
+                                                                  0,
+                                                                  0
+                                                              ],
+                                  "elapsed_ms":  0.5621000018436462,
+                                  "passed":  true
+                              },
+                              {
+                                  "reads":  2,
+                                  "mode2":  true,
+                                  "delay_ms":  0.0,
+                                  "pending_before_abort":  [
+                                                               258,
+                                                               258
+                                                           ],
+                                  "cancelled":  [
+                                                    true,
+                                                    true
+                                                ],
+                                  "recovery":  true,
+                                  "read_return_statuses":  [
+                                                               4,
+                                                               4
+                                                           ],
+                                  "abort_status":  0,
+                                  "completion_wait_results":  [
+                                                                  0,
+                                                                  0
+                                                              ],
+                                  "elapsed_ms":  0.20289997337386012,
+                                  "passed":  true
+                              },
+                              {
+                                  "reads":  2,
+                                  "mode2":  true,
+                                  "delay_ms":  50.0,
+                                  "pending_before_abort":  [
+                                                               258,
+                                                               258
+                                                           ],
+                                  "cancelled":  [
+                                                    true,
+                                                    true
+                                                ],
+                                  "recovery":  true,
+                                  "read_return_statuses":  [
+                                                               4,
+                                                               4
+                                                           ],
+                                  "abort_status":  0,
+                                  "completion_wait_results":  [
+                                                                  0,
+                                                                  0
+                                                              ],
+                                  "elapsed_ms":  0.1039999770000577,
+                                  "passed":  true
+                              },
+                              {
+                                  "reads":  2,
+                                  "mode2":  true,
+                                  "delay_ms":  50.0,
+                                  "pending_before_abort":  [
+                                                               258,
+                                                               258
+                                                           ],
+                                  "cancelled":  [
+                                                    true,
+                                                    true
+                                                ],
+                                  "recovery":  true,
+                                  "read_return_statuses":  [
+                                                               4,
+                                                               4
+                                                           ],
+                                  "abort_status":  0,
+                                  "completion_wait_results":  [
+                                                                  0,
+                                                                  0
+                                                              ],
+                                  "elapsed_ms":  0.050300004659220576,
+                                  "passed":  true
+                              },
+                              {
+                                  "reads":  2,
+                                  "mode2":  true,
+                                  "delay_ms":  50.0,
+                                  "pending_before_abort":  [
+                                                               258,
+                                                               258
+                                                           ],
+                                  "cancelled":  [
+                                                    true,
+                                                    true
+                                                ],
+                                  "recovery":  true,
+                                  "read_return_statuses":  [
+                                                               4,
+                                                               4
+                                                           ],
+                                  "abort_status":  0,
+                                  "completion_wait_results":  [
+                                                                  0,
+                                                                  0
+                                                              ],
+                                  "elapsed_ms":  0.13189998571760952,
+                                  "passed":  true
+                              },
+                              {
+                                  "reads":  2,
+                                  "mode2":  true,
+                                  "delay_ms":  50.0,
+                                  "pending_before_abort":  [
+                                                               258,
+                                                               258
+                                                           ],
+                                  "cancelled":  [
+                                                    true,
+                                                    true
+                                                ],
+                                  "recovery":  true,
+                                  "read_return_statuses":  [
+                                                               4,
+                                                               4
+                                                           ],
+                                  "abort_status":  0,
+                                  "completion_wait_results":  [
+                                                                  0,
+                                                                  0
+                                                              ],
+                                  "elapsed_ms":  0.08089997572824359,
+                                  "passed":  true
+                              },
+                              {
+                                  "reads":  2,
+                                  "mode2":  true,
+                                  "delay_ms":  50.0,
+                                  "pending_before_abort":  [
+                                                               258,
+                                                               258
+                                                           ],
+                                  "cancelled":  [
+                                                    true,
+                                                    true
+                                                ],
+                                  "recovery":  true,
+                                  "read_return_statuses":  [
+                                                               4,
+                                                               4
+                                                           ],
+                                  "abort_status":  0,
+                                  "completion_wait_results":  [
+                                                                  0,
+                                                                  0
+                                                              ],
+                                  "elapsed_ms":  0.050000002374872565,
+                                  "passed":  true
+                              },
+                              {
+                                  "reads":  2,
+                                  "mode2":  false,
+                                  "delay_ms":  0.0,
+                                  "pending_before_abort":  [
+                                                               258,
+                                                               258
+                                                           ],
+                                  "cancelled":  [
+                                                    true,
+                                                    true
+                                                ],
+                                  "recovery":  true,
+                                  "read_return_statuses":  [
+                                                               4,
+                                                               4
+                                                           ],
+                                  "abort_status":  0,
+                                  "completion_wait_results":  [
+                                                                  0,
+                                                                  0
+                                                              ],
+                                  "elapsed_ms":  0.39060000563040376,
+                                  "passed":  true
+                              },
+                              {
+                                  "reads":  2,
+                                  "mode2":  false,
+                                  "delay_ms":  0.0,
+                                  "pending_before_abort":  [
+                                                               258,
+                                                               258
+                                                           ],
+                                  "cancelled":  [
+                                                    true,
+                                                    true
+                                                ],
+                                  "recovery":  true,
+                                  "read_return_statuses":  [
+                                                               4,
+                                                               4
+                                                           ],
+                                  "abort_status":  0,
+                                  "completion_wait_results":  [
+                                                                  0,
+                                                                  0
+                                                              ],
+                                  "elapsed_ms":  0.41859998600557446,
+                                  "passed":  true
+                              },
+                              {
+                                  "reads":  2,
+                                  "mode2":  false,
+                                  "delay_ms":  0.0,
+                                  "pending_before_abort":  [
+                                                               258,
+                                                               258
+                                                           ],
+                                  "cancelled":  [
+                                                    true,
+                                                    true
+                                                ],
+                                  "recovery":  true,
+                                  "read_return_statuses":  [
+                                                               4,
+                                                               4
+                                                           ],
+                                  "abort_status":  0,
+                                  "completion_wait_results":  [
+                                                                  0,
+                                                                  0
+                                                              ],
+                                  "elapsed_ms":  0.39239999023266137,
+                                  "passed":  true
+                              },
+                              {
+                                  "reads":  2,
+                                  "mode2":  false,
+                                  "delay_ms":  0.0,
+                                  "pending_before_abort":  [
+                                                               258,
+                                                               258
+                                                           ],
+                                  "cancelled":  [
+                                                    true,
+                                                    true
+                                                ],
+                                  "recovery":  true,
+                                  "read_return_statuses":  [
+                                                               4,
+                                                               4
+                                                           ],
+                                  "abort_status":  0,
+                                  "completion_wait_results":  [
+                                                                  0,
+                                                                  0
+                                                              ],
+                                  "elapsed_ms":  0.42539997957646847,
+                                  "passed":  true
+                              },
+                              {
+                                  "reads":  2,
+                                  "mode2":  false,
+                                  "delay_ms":  0.0,
+                                  "pending_before_abort":  [
+                                                               258,
+                                                               258
+                                                           ],
+                                  "cancelled":  [
+                                                    true,
+                                                    true
+                                                ],
+                                  "recovery":  true,
+                                  "read_return_statuses":  [
+                                                               4,
+                                                               4
+                                                           ],
+                                  "abort_status":  0,
+                                  "completion_wait_results":  [
+                                                                  0,
+                                                                  0
+                                                              ],
+                                  "elapsed_ms":  0.3150000120513141,
+                                  "passed":  true
+                              },
+                              {
+                                  "reads":  2,
+                                  "mode2":  false,
+                                  "delay_ms":  50.0,
+                                  "pending_before_abort":  [
+                                                               258,
+                                                               258
+                                                           ],
+                                  "cancelled":  [
+                                                    true,
+                                                    true
+                                                ],
+                                  "recovery":  true,
+                                  "read_return_statuses":  [
+                                                               4,
+                                                               4
+                                                           ],
+                                  "abort_status":  0,
+                                  "completion_wait_results":  [
+                                                                  0,
+                                                                  0
+                                                              ],
+                                  "elapsed_ms":  0.13959998614154756,
+                                  "passed":  true
+                              },
+                              {
+                                  "reads":  2,
+                                  "mode2":  false,
+                                  "delay_ms":  50.0,
+                                  "pending_before_abort":  [
+                                                               258,
+                                                               258
+                                                           ],
+                                  "cancelled":  [
+                                                    true,
+                                                    true
+                                                ],
+                                  "recovery":  true,
+                                  "read_return_statuses":  [
+                                                               4,
+                                                               4
+                                                           ],
+                                  "abort_status":  0,
+                                  "completion_wait_results":  [
+                                                                  0,
+                                                                  0
+                                                              ],
+                                  "elapsed_ms":  0.07429998368024826,
+                                  "passed":  true
+                              },
+                              {
+                                  "reads":  2,
+                                  "mode2":  false,
+                                  "delay_ms":  50.0,
+                                  "pending_before_abort":  [
+                                                               258,
+                                                               258
+                                                           ],
+                                  "cancelled":  [
+                                                    true,
+                                                    true
+                                                ],
+                                  "recovery":  true,
+                                  "read_return_statuses":  [
+                                                               4,
+                                                               4
+                                                           ],
+                                  "abort_status":  0,
+                                  "completion_wait_results":  [
+                                                                  0,
+                                                                  0
+                                                              ],
+                                  "elapsed_ms":  0.13230001786723733,
+                                  "passed":  true
+                              },
+                              {
+                                  "reads":  2,
+                                  "mode2":  false,
+                                  "delay_ms":  50.0,
+                                  "pending_before_abort":  [
+                                                               258,
+                                                               258
+                                                           ],
+                                  "cancelled":  [
+                                                    true,
+                                                    true
+                                                ],
+                                  "recovery":  true,
+                                  "read_return_statuses":  [
+                                                               4,
+                                                               4
+                                                           ],
+                                  "abort_status":  0,
+                                  "completion_wait_results":  [
+                                                                  0,
+                                                                  0
+                                                              ],
+                                  "elapsed_ms":  0.0771000050008297,
+                                  "passed":  true
+                              },
+                              {
+                                  "reads":  2,
+                                  "mode2":  false,
+                                  "delay_ms":  50.0,
+                                  "pending_before_abort":  [
+                                                               258,
+                                                               258
+                                                           ],
+                                  "cancelled":  [
+                                                    true,
+                                                    true
+                                                ],
+                                  "recovery":  true,
+                                  "read_return_statuses":  [
+                                                               4,
+                                                               4
+                                                           ],
+                                  "abort_status":  0,
+                                  "completion_wait_results":  [
+                                                                  0,
+                                                                  0
+                                                              ],
+                                  "elapsed_ms":  0.13279999257065356,
+                                  "passed":  true
+                              }
+                          ],
+    "date":  "2026-10-08",
+    "impedance":  {
+                      "exe":  "C:\\Users\\Jeremy\\IONM-A-FPGA\\out\\emulator-endre-release\\emulator\\Release\\ionm_emulator.exe",
+                      "shim":  "out/emulator-endre-release/shim/Release/FTD3XX.dll",
+                      "leg":  null,
+                      "dwell_ms":  0,
+                      "delay_ms":  0,
+                      "measurements":  512,
+                      "expected_measurements":  512,
+                      "error":  "",
+                      "failures":  [
+
+                                   ],
+                      "seconds":  1.320455551147461,
+                      "frames":  512,
+                      "bad_crc":  0
+                  },
+    "shim_sha256":  "805C23EE8A41C0778E0ACDA92006ADF3FEE75668F29F550D7E72D3E8B6209556"
+}
