@@ -150,3 +150,24 @@ overproduction across the stall/recovery fail. The tolerance allows scheduling,
 not a different configured rate. The test takes about eight seconds, uses a
 private endpoint and looping sample fixture, and leaves interactive emulators
 alone. It is registered as the host target `emulator_sample_rate` (not RTL).
+
+## October 8 contractor impedance investigation
+
+Windows `shim_timeout_test` builds with the software emulator CMake project.
+Run `<build>/shim/Release/shim_timeout_test.exe`: idle, partial-prefix and
+partial-payload reads must honor the timeout and preserve framing on retry.
+The pre-fix shim required the test's 400 ms emergency abort instead of its
+40 ms timeout. Buffered-mode abort, disconnect and recovery are also checked.
+
+`python -B fpga-test/emulator/test_shim_connection.py --exe PATH --shim DLL`
+checks second-client rejection, a null failed-open handle, continued access by
+the owner, and reconnection. The pre-fix failed open left the old output handle.
+
+`python -B fpga-test/emulator/test_rapid_impedance.py --exe PATH`
+is an investigation reproducer, not evidence of a fixed pixel-state bug:
+both the old and new models pass 512 measurements (64 positions, both
+parities, four legs) with no post-capture sleep. It reports command latency.
+Add `--fixture DIR` to check the expected ADC swings from
+`tools/make_emulator_impedance_example.py DIR` in the parent repository.
+No timing threshold is imposed on CI; the measured local median fell from
+3.589 ms to 0.027 ms after removing command-response scheduling delays.
