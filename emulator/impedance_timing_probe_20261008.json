@@ -1,0 +1,118 @@
+{
+    "date":  "2026-10-08",
+    "result":  "Not reproduced; no new race fix claimed",
+    "runs":  [
+                 {
+                     "exe":  "C:\\Users\\Jeremy\\IONM-A-FPGA\\Software Emulator\\build\\test_app\\Release\\ionm_emulator.exe",
+                     "delay_ms":  100.0,
+                     "measurements":  512,
+                     "expected_measurements":  512,
+                     "error":  "",
+                     "failures":  [
+
+                                  ],
+                     "seconds":  14.221594333648682,
+                     "frames":  512,
+                     "bad_crc":  0
+                 },
+                 {
+                     "exe":  "C:\\Users\\Jeremy\\IONM-A-FPGA\\Software Emulator\\build\\test_app\\Release\\ionm_emulator.exe",
+                     "delay_ms":  0,
+                     "measurements":  4096,
+                     "expected_measurements":  4096,
+                     "error":  "",
+                     "failures":  [
+
+                                  ],
+                     "seconds":  9.77349305152893,
+                     "frames":  4096,
+                     "bad_crc":  0
+                 },
+                 {
+                     "exe":  "C:\\Users\\Jeremy\\IONM-A-FPGA\\out\\emulator-endre-baseline-build\\emulator\\Release\\ionm_emulator.exe",
+                     "delay_ms":  0,
+                     "measurements":  512,
+                     "expected_measurements":  512,
+                     "error":  "",
+                     "failures":  [
+
+                                  ],
+                     "seconds":  31.915992975234985,
+                     "frames":  512,
+                     "bad_crc":  0
+                 },
+                 {
+                     "exe":  "C:\\Users\\Jeremy\\IONM-A-FPGA\\Software Emulator\\build\\test_app\\Release\\ionm_emulator.exe",
+                     "shim":  "out/emulator-endre-release/shim/Release/FTD3XX.dll",
+                     "dwell_ms":  0,
+                     "delay_ms":  100.0,
+                     "measurements":  512,
+                     "expected_measurements":  512,
+                     "error":  "",
+                     "failures":  [
+
+                                  ],
+                     "seconds":  18.174229621887207,
+                     "frames":  512,
+                     "bad_crc":  0
+                 },
+                 {
+                     "exe":  "C:\\Users\\Jeremy\\IONM-A-FPGA\\Software Emulator\\build\\test_app\\Release\\ionm_emulator.exe",
+                     "shim":  "out/emulator-endre-release/shim/Release/FTD3XX.dll",
+                     "dwell_ms":  50.0,
+                     "delay_ms":  0,
+                     "measurements":  512,
+                     "expected_measurements":  512,
+                     "error":  "",
+                     "failures":  [
+
+                                  ],
+                     "seconds":  25.476379871368408,
+                     "frames":  15701,
+                     "bad_crc":  0
+                 },
+                 {
+                     "exe":  "C:\\Users\\Jeremy\\IONM-A-FPGA\\Software Emulator\\build\\test_app\\Release\\ionm_emulator.exe",
+                     "delay_ms":  0,
+                     "measurements":  512,
+                     "expected_measurements":  512,
+                     "error":  "",
+                     "failures":  [
+
+                                  ],
+                     "seconds":  1.3271205425262451,
+                     "frames":  512,
+                     "bad_crc":  0
+                 },
+                 {
+                     "exe":  "C:\\Users\\Jeremy\\IONM-A-FPGA\\Software Emulator\\build\\test_app\\Release\\ionm_emulator.exe",
+                     "shim":  "out/emulator-endre-release/shim/Release/FTD3XX.dll",
+                     "leg":  0,
+                     "dwell_ms":  10.0,
+                     "delay_ms":  0,
+                     "measurements":  1024,
+                     "expected_measurements":  1024,
+                     "error":  "",
+                     "failures":  [
+
+                                  ],
+                     "seconds":  24.159903526306152,
+                     "frames":  22648,
+                     "bad_crc":  0
+                 }
+             ],
+    "binaries":  [
+                     {
+                         "Path":  "C:\\Users\\Jeremy\\IONM-A-FPGA\\Software Emulator\\build\\test_app\\Release\\ionm_emulator.exe",
+                         "Hash":  "A6C191D90804FECA334943CCA5B4DFABD9CE832A7759AE94D078DBDA9144A541"
+                     },
+                     {
+                         "Path":  "C:\\Users\\Jeremy\\IONM-A-FPGA\\out\\emulator-endre-release\\shim\\Release\\FTD3XX.dll",
+                         "Hash":  "2B5962D4005E55566E53EDAD4DA28F6B0EA7106C7FF2F8B14DF1FB9F24D453DA"
+                     },
+                     {
+                         "Path":  "C:\\Users\\Jeremy\\IONM-A-FPGA\\out\\emulator-endre-baseline-build\\emulator\\Release\\ionm_emulator.exe",
+                         "Hash":  "6F481792F062D120C5B564DE4FC4E8D3F7ED336740E6DD5A6C875812A2DB6C72"
+                     }
+                 ]
+}

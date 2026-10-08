@@ -171,3 +171,47 @@ Add `--fixture DIR` to check the expected ADC swings from
 `tools/make_emulator_impedance_example.py DIR` in the parent repository.
 No timing threshold is imposed on CI; the measured local median fell from
 3.589 ms to 0.027 ms after removing command-response scheduling delays.
+
+### Expanded local reproduction attempt (October 8)
+
+`probe_impedance_timing.py` is a manual investigation tool, not a CI target.
+It reuses the sequential pixel-chain programming and decoder from
+`diff_emulators.py`, checks pixel identity and expected injection amplitude,
+and uses private endpoints without closing interactive emulator sessions.
+No extra post-capture sleep is added. Example, from the parent checkout:
+
+```powershell
+python -B fpga-test/emulator/probe_impedance_timing.py --exe "Software Emulator/build/test_app/Release/ionm_emulator.exe" --shim out/emulator-endre-release/shim/Release/FTD3XX.dll --lanes 2 --dwell-ms 50 --out out/probe.json
+```
+
+Omit `--shim` for direct pipe transport. Default `--lanes 16` covers all lanes;
+default capture is four frames. `--delay-ms 100` delays consuming data after
+RUN acknowledgement (with the shim, this also pauses actual host reads).
+`--leg 0` selects only LEG5, including the enable mask. `--dwell-ms 10`
+uses a wall-clock capture interval; none of these are hardware timing promises.
+
+Saved results and binary hashes: `impedance_timing_probe_20261008.json`.
+All seven recorded runs passed (7,680 electrode measurements):
+
+| Variant | Measurements | Result |
+|---|---:|---|
+| Current emulator, all lanes, direct pipe | 4096 | Pass |
+| Current emulator, 100 ms consumer delay, direct pipe | 512 | Pass |
+| Pre-fix emulator, direct pipe | 512 | Pass |
+| Current emulator and shim, immediate reads | 512 | Pass |
+| Current emulator and shim, 100 ms read delay | 512 | Pass |
+| Current emulator and shim, 50 ms dwell | 512 | Pass |
+| Current emulator and shim, LEG5, all lanes, 10 ms dwell | 1024 | Pass |
+
+No CRC errors, wrong active rows, missing measurements, or unexpected swings
+were detected in these runs. The shim variants use synchronous FT_ReadPipe /
+FT_WritePipe calls; they do not exercise a contractor-specific asynchronous
+reader, cancellation, or concurrent command ownership. The protocol runner
+consumes telemetry preceding the Stop acknowledgement. A client that stops
+its reader differently may still behave differently. Tests used the model's
+default injection, not the stainless-steel input or contractor recordings.
+
+Conclusion: the reported all-disabled failure after 10–15 sensors remains
+unreproduced. These results do not establish that a race was found or fixed.
+Next useful comparison is the contractor client's exact read/stop/drain and
+pixel-write sequence, especially overlapped reads and cancellation.
