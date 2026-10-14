@@ -123,3 +123,10 @@ watchdog command priority and the exact production timeout cycle. They pass
 18,450 assertions. Three deliberate defects (occupied-bank overwrite, one-cycle
 late timeout and coupled amplifier/test controls) each fail the corresponding
 bench. Integration and board-level acceptance remain open.
+
+The `consolidator_connected_legs` target compiles the common end-to-end smoke
+bench with only the PCB's connected interfaces exposed. The same bench remains
+compatible with the original top-level ports. Both configurations pass 16
+assertions each. Together with eight transport, ownership and watchdog targets,
+the board-porting regression passes 26,253 assertions across ten targets.
+This does not establish routed timing or completion of the buffered protocol.

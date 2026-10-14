@@ -144,8 +144,10 @@ module tb_top;
         .SPI_MISO_LEG8     (spi_miso_b2c[3]),
         .SPI_MOSI_LEG8     (spi_mosi_c2t[3]),
         .SPI_SCLK_LEG8     (spi_sclk_c2t[3]),
-        .SPI_SS_LEG8       (spi_ss_c2t[3]),
+        .SPI_SS_LEG8       (spi_ss_c2t[3])
 
+`ifndef CONSOLIDATOR_CONNECTED_LEGS_ONLY
+        ,
         // Reserve SPI channels — outputs left open, MISO inputs tied 0
         .SPI_MISO_LEG1     (),           // output in V2
         .SPI_MOSI_LEG1     (),
@@ -169,6 +171,7 @@ module tb_top;
         .SPI_MOSI_LEG9     (),
         .SPI_SCLK_LEG9     (),
         .SPI_SS_LEG9       ()
+`endif
     );
 
     // =========================================================================
