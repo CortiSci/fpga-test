@@ -85,6 +85,7 @@ import sys
 import threading
 import time
 import zlib
+import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from queue import Empty, Queue
@@ -513,9 +514,10 @@ def run_emulator(name: str, exe: Path, args: list[str], telem_mode: int, n_frame
     kw = {}
     if os.name == "nt":
         kw["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW
-    proc = subprocess.Popen([str(exe), *args], cwd=str(exe.parent),
+    pipe_base = "IONM_DIFF_" + uuid.uuid4().hex
+    proc = subprocess.Popen([str(exe), *args, "-pipe", pipe_base], cwd=str(exe.parent),
                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **kw)
-    pipe = PipeClient()
+    pipe = PipeClient(pipe_base)
     try:
         if not pipe.wait_for_pipe(30):
             res.error = "emulator never created its transport endpoints"
@@ -727,9 +729,10 @@ def run_inject(name: str, exe: Path, args: list[str], first_frame_timeout: float
     kw = {}
     if os.name == "nt":
         kw["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW
-    proc = subprocess.Popen([str(exe), *args], cwd=str(exe.parent),
+    pipe_base = "IONM_DIFF_" + uuid.uuid4().hex
+    proc = subprocess.Popen([str(exe), *args, "-pipe", pipe_base], cwd=str(exe.parent),
                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **kw)
-    pipe = PipeClient()
+    pipe = PipeClient(pipe_base)
     try:
         if not pipe.wait_for_pipe(30):
             res.error = "emulator never created its transport endpoints"

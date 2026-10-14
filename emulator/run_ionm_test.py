@@ -23,6 +23,8 @@ import re
 import subprocess
 import sys
 import time
+import tempfile
+import uuid
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -37,8 +39,13 @@ SUMMARY_RE = re.compile(r"^\s*PASS:\s*(\d+)\s+FAIL:\s*(\d+)\s*$", re.M)
 def run_once(args: list[str], timeout: float) -> tuple[int, int, int, list[str], str]:
     """(exit, n_pass, n_fail, failing check lines, transcript)."""
     try:
-        c = subprocess.run([str(EXE), *args], cwd=str(RELEASE), capture_output=True, text=True,
-                           encoding="utf-8", errors="replace", timeout=timeout)
+        env = dict(os.environ)
+        env["IONM_PIPE_NAME"] = "IONM_INTEGRATION_" + uuid.uuid4().hex
+        # Keep generated samples/captures separate from interactive demo files.
+        with tempfile.TemporaryDirectory(prefix="ionm_integration_") as work:
+            c = subprocess.run([str(EXE), *args], cwd=work, env=env,
+                               capture_output=True, text=True,
+                               encoding="utf-8", errors="replace", timeout=timeout)
     except subprocess.TimeoutExpired as e:
         out = (e.stdout or "") if isinstance(e.stdout, str) else ""
         return 124, 0, 0, [f"ionm_test timed out after {timeout:.0f} s"], out
