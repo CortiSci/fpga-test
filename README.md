@@ -3,6 +3,10 @@
 Testbenches, behavioural models and simulation scripts for the IONM-A FPGA
 designs. Mounted as a submodule of `IONM-A-FPGA`, which holds the RTL.
 
+The `rev2` branch includes the [Rev 2 verification plan](docs/rev2_test_plan.md)
+for upgraded tails and delegated acquisition work. Its proposed targets are not
+registered tests or passing results yet.
+
 The split exists so a bench can be run against **any revision of the design**
 without disturbing either checkout — the thing that was painful when both lived
 in one repo.
