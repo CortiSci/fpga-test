@@ -184,3 +184,21 @@ leg; it is never counted as clean recovery. Partially filled stopped legs still
 require an error flag. The stronger pull deficit configuration (135/1000 drain)
 exhausts the new tail storage within the existing window; the original recorded
 152/1000 condition remains unchanged for the old transport.
+
+
+### Local ASIC transaction acceptance
+
+- `tail_asic_transaction`: independent 640 kHz, exactly 24 mode-0 clocks, both
+  selects, arbitrary payload/readback, host SCLK stops after submission, busy
+  mailbox protection, invalid selector, streaming/relay conflict, truncated
+  request, watchdog abort, reset and explicit recovery. 171 assertions.
+- `tail_asic_routing`: real tail top pin mux, acquisition deferred while a local
+  request is pending, and legacy relay MISO priority for payload opcode 0A.
+  Seven assertions; no forced internal state.
+- `consolidator_local_asic`: existing USB/SPI_CFG transport reaches all four tails,
+  validates capability, both selects and independently scored ASIC pin payload and
+  MISO readback. 444 assertions. ASIC-model register semantics are not the oracle.
+
+The old relay is retained; host applications have not been migrated automatically.
+A status read must distinguish transport completion from ASIC completion. Hardware
+qualification must confirm electrical timing, register readback and abort behavior.

@@ -309,10 +309,12 @@ module tb_top;
     `include "tests/test_watchdog.sv"
     `include "tests/test_ber_stream.sv"
     `include "tests/test_pll_loss.sv"
+    `include "tests/test_local_asic.sv"
 
     // =========================================================================
     // Main test sequence (default — runs when no other define selects a suite)
     // =========================================================================
+`ifndef RUN_LOCAL_ASIC
 `ifndef RUN_SPI_PING
 `ifndef RUN_ACED
 `ifndef RUN_BIST
@@ -382,6 +384,7 @@ module tb_top;
 `endif  // !RUN_BIST
 `endif  // !RUN_ACED
 `endif  // !RUN_SPI_PING
+`endif  // !RUN_LOCAL_ASIC
 
     // =========================================================================
     // SA-ACED streaming test sequence (compiled with +define+RUN_ACED)

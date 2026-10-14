@@ -6,7 +6,7 @@ module tb_buffered_control_link;
     integer passes=0;
     always #24.414 clk=~clk;
 `ifdef PULL_LINK
-    localparam MODE=2, CAPABILITIES=15;
+    localparam MODE=2, CAPABILITIES=31;
 `else
     localparam MODE=1, CAPABILITIES=7;
 `endif
