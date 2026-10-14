@@ -23,9 +23,9 @@ in the design repo):
 
 Source paths in target definitions stay written **repo-relative** — e.g.
 `consolidator/tb_board.sv` and
-`consolidator_v2/src/rtl/spi_ch_stream.v` — and are routed to the owning root
+`consolidator/src/rtl/spi_ch_stream.v` — and are routed to the owning root
 by `_is_dut_path()`. The layout here is FLAT and version-neutral — `consolidator/`, `tail/`,
-`models/`, `tasks/` — not `consolidator_v2/src/sim/`.  The benches are meant to
+`models/`, `tasks/` — not `consolidator/src/sim/`.  The benches are meant to
 run against every implementation of a module regardless of its version, so the
 repo is named after the module, not the revision.  The runner maps its
 repo-relative test paths onto this layout.
@@ -43,7 +43,7 @@ not re-introduce a copy of the module list here.
 ## Running a bench against another branch
 
 ```python
-run_simulation("consolidator_board_identity", rtl_ref="72606e4")
+run_simulation("consolidator_identity", rtl_ref="72606e4")
 ```
 
 The RTL is materialised from that ref; the benches always come from this
@@ -137,6 +137,6 @@ often here:
 ## Status
 
 The suite is not currently green: both consolidator revisions fail
-`consolidator_board_identity`, and geoff's own release receipt records
+`consolidator_identity`, and geoff's own release receipt records
 `single_leg`, `board_unique`, `board_unique_skew` and `tail_reset` as blocking.
 Establish a green baseline before treating a failure here as a regression.

@@ -43,8 +43,8 @@ module tb_usb_rx_probe_after_burst;
     wire mover_valid, fifo_full, fifo_almost_full, fifo_empty;
     wire rx_ready, tx_valid, reg_we, fault_frame_sent, ctrl_early;
     wire [4:0] fault_flags_sent;
-    wire mover_ready = ~fifo_almost_full & ~fifo_full;   // consolidator_v2_top fsm_rx_ready
-    wire rx_valid    = ~fifo_empty;                       // consolidator_v2_top cmd_rx_valid
+    wire mover_ready = ~fifo_almost_full & ~fifo_full;   // consolidator_top fsm_rx_ready
+    wire rx_valid    = ~fifo_empty;                       // consolidator_top cmd_rx_valid
     reg  tx_ready = 1;                                    // TX CDC has room (nothing else is sending)
     reg  [15:0] rx_words = 0;                             // USB_RX_WORDS: words cmd_decoder consumed
     wire [15:0] reg_rdata = (reg_addr==16'h005e) ? rx_words : 16'hcafe;

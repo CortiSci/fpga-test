@@ -39,7 +39,7 @@ module tb_usb_rx_backpressure_loss;
     wire mover_valid;
     wire fifo_full, fifo_almost_full, fifo_empty;
     wire [15:0] fifo_data;
-    wire mover_ready = ~fifo_almost_full & ~fifo_full;   // consolidator_v2_top fsm_rx_ready
+    wire mover_ready = ~fifo_almost_full & ~fifo_full;   // consolidator_top fsm_rx_ready
     `ifdef RX_CONSUMER_STALL
     reg core_stall=1;
 `else

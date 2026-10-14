@@ -1,5 +1,5 @@
 // Consolidator V2 Top-Level Testbench
-// Instantiates: consolidator_v2_top DUT, 4× tail_fpga_small DUT,
+// Instantiates: consolidator_top DUT, 4× tail_core DUT,
 //               4× UCSD ASIC model, 4× ADS122C14 I2C stub,
 //               FT600Q TLM, 4× SPI master BFM (retained for debug).
 // Models, task packages, and primitive stubs are shared from the
@@ -102,7 +102,7 @@ module tb_top;
     // =========================================================================
     // Consolidator V2 DUT
     // =========================================================================
-    consolidator_v2_top dut_con (
+    consolidator_top dut_con (
         .MCLK_20_48M_FPGA  (mclk_con),
         .DEVRST_N          (devrst_n),
         .PROGRAMN          (1'b1),
@@ -176,7 +176,7 @@ module tb_top;
 
     // =========================================================================
     // Small Tail FPGA DUT instances + UCSD ASIC models + I2C ADC stubs (×4)
-    // tail_fpga_small has the same external port interface as record_tail_fpga.
+    // tail_core has the same external port interface as record_tail_fpga.
     // =========================================================================
     genvar ch;
     generate
@@ -188,11 +188,11 @@ module tb_top;
             wire mclk_en_w;
 
 `ifdef CONSOLIDATOR_PULL_LINK
-            tail_fpga_small #(.BUFFERED_CAPTURE(2)) dut_tail (
+            tail_core #(.BUFFERED_CAPTURE(2)) dut_tail (
 `elsif BUFFERED_TAIL_CAPTURE
-            tail_fpga_small #(.BUFFERED_CAPTURE(1)) dut_tail (
+            tail_core #(.BUFFERED_CAPTURE(1)) dut_tail (
 `else
-            tail_fpga_small dut_tail (
+            tail_core dut_tail (
 `endif
                 .RO1_SD                 (ro1_sd[ch]),
                 .RO1_FRAME              (ro1_frame[ch]),
@@ -356,7 +356,7 @@ module tb_top;
         run_CV03();
         run_CV04();
 
-        // SPI ping: USB → cmd_decoder → spi_cfg_ctrl → spi_master → tail_fpga_small
+        // SPI ping: USB → cmd_decoder → spi_cfg_ctrl → spi_master → tail_core
         run_SP01();
         run_SP02();
         run_SP03();

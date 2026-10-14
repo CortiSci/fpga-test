@@ -1,15 +1,15 @@
-// Simulation-only wrapper — exposes record_tail_fpga under the name tail_fpga_small.
+// Simulation-only wrapper — exposes record_tail_fpga under the name tail_core.
 //
-// tb_top.sv instantiates module tail_fpga_small.  In the production-Tail regression
+// tb_top.sv instantiates module tail_core.  In the production-Tail regression
 // sim (test_spi_ping_prod_tail.do) we want the real record_tail_fpga RTL to sit in
-// that socket instead of the simplified tail_fpga_small.
+// that socket instead of the simplified tail_core.
 //
-// Port lists of tail_fpga_small and record_tail_fpga are identical (same names, same
+// Port lists of tail_core and record_tail_fpga are identical (same names, same
 // directions, same widths), so `(.*)` wildcard port connections are correct.
 // This file must be compiled AFTER record_tail_fpga.v and BEFORE tb_top.sv.
 `timescale 1ns/1ps
 
-module tail_fpga_small (
+module tail_core (
     input  wire [15:0] RO1_SD,
     input  wire        RO1_FRAME,
     input  wire        RO1_CLK,

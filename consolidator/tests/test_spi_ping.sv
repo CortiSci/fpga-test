@@ -1,6 +1,6 @@
 // SP-01 through SP-04: End-to-end SPI ping tests via the USB→SPI_CFG path.
 //
-// Each test sends CMD_PING (0xAA) to one tail_fpga_small channel through the
+// Each test sends CMD_PING (0xAA) to one tail_core channel through the
 // complete RTL stack: FT600Q BFM → cmd_decoder → spi_cfg_ctrl → spi_master →
 // physical SPI bus → user_spi_slave / simple_ping_decoder → MISO response
 // captured by spi_cfg_ctrl → readable via REG_SPI_CFG_RD23.

@@ -4,7 +4,7 @@
 // All tail setup is driven through the USB→SPI_CFG register interface.
 //
 //   USB cmd → cmd_decoder → spi_cfg_ctrl → spi_master → SPI bus
-//   → spi_slave_small (CTRL: RO_RSTn+MCLK_EN, TELEM_EN: 0x01)
+//   → tail_spi_slave (CTRL: RO_RSTn+MCLK_EN, TELEM_EN: 0x01)
 //   → asic_stream_tx → SPI MISO → spi_ch_stream → small_fifo
 //   → telemetry_framer_v2 → CDC FIFO → usb_fifo_interface → FT600Q TLM
 //

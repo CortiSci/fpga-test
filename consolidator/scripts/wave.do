@@ -38,7 +38,7 @@ add wave -noupdate -label ctrl_wr_ptr   /tb_top/u_ft600q/ctrl_wr_ptr
 add wave -noupdate -label ctrl_rd_ptr   /tb_top/u_ft600q/ctrl_rd_ptr
 
 # ------------------------------------------------------------------
-# USB FIFO FSM (ft600_245_fifo_fsm inside consolidator_v2_top)
+# USB FIFO FSM (ft600_245_fifo_fsm inside consolidator_top)
 # Shows the 1-cycle pipeline: usb_d_pipe, rd_n_was_low, captures
 # ------------------------------------------------------------------
 add wave -divider "USB FSM (ft600_245_fifo_fsm)"
@@ -104,7 +104,7 @@ add wave -noupdate -label spim_rx_data -hex /tb_top/dut_con/spi_cfg_m/rx_data
 # ------------------------------------------------------------------
 # Tail FPGA #0 (ch0 / LEG5) SPI slave
 # ------------------------------------------------------------------
-add wave -divider "tail_fpga_small ch0 SPI slave (spi_slave_small)"
+add wave -divider "tail_core ch0 SPI slave (tail_spi_slave)"
 add wave -noupdate -label t0_ss_n         /tb_top/tail_ch[0]/dut_tail/u_spi_slave/ss_n
 add wave -noupdate -label t0_bit_cnt      /tb_top/tail_ch[0]/dut_tail/u_spi_slave/bit_cnt
 add wave -noupdate -label t0_byte_cnt     /tb_top/tail_ch[0]/dut_tail/u_spi_slave/byte_cnt

@@ -1,11 +1,11 @@
 // ============================================================
 // tb_aced.sv  —  UNIT TEST: ACED raw-bit-plane forwarding
 //
-// This bench does not instantiate consolidator_v2_top and does not exercise
+// This bench does not instantiate consolidator_top and does not exercise
 // USB. It may use a local SPI mux for Tail setup; it must never be presented
 // as system-integration evidence.
 //
-// Tests: tail_fpga_small → SPI MISO → spi_ch_stream (consolidator)
+// Tests: tail_core → SPI MISO → spi_ch_stream (consolidator)
 //
 // Test data: all 1024 sensors per frame output value 0xACED.
 // This requires ro1_sd to follow the bit-serial encoding of 0xACED:
@@ -138,10 +138,10 @@ spi_ch_stream u_strm (
     .phase_known ()
 );
 
-// ---- tail_fpga_small: channel 0 ----------------------------------------
+// ---- tail_core: channel 0 ----------------------------------------
 wire sda_stub, scl_stub;
 
-tail_fpga_small u_tail (
+tail_core u_tail (
     .RO1_SD               (ro1_sd),
     .RO1_FRAME            (ro1_frame),
     .RO1_CLK              (ro1_clk),
@@ -168,7 +168,7 @@ tail_fpga_small u_tail (
 
 // ---- Bit-bang SPI tasks (Mode 0: CPOL=0 CPHA=0, MSB-first) ------------
 // Half-period = 200 ns → 2.5 MHz.  Runs only during bfm_sel=1 phase.
-// spi_slave_small samples MOSI on posedge of FPGA_SPI_SCLK = tail_sclk = tb_sclk.
+// tail_spi_slave samples MOSI on posedge of FPGA_SPI_SCLK = tail_sclk = tb_sclk.
 
 task spi_send_byte;
     input [7:0] data;

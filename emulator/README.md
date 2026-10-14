@@ -4,7 +4,7 @@
 drives both with the **same host command sequence**, decodes both with the
 **same parser**, and reports where the results differ.  Its job is to verify
 that the software emulator (`ionm_emulator.exe`, pure C++) behaves like the RTL
-(`ionm_emu_rtl.exe`, Verilator-compiled `consolidator_v2` + 4× `tail_fpga_small`)
+(`ionm_emu_rtl.exe`, Verilator-compiled `consolidator` + 4× `tail_core`)
 — not to verify the RTL itself.
 
 ## Why a host program, not an Icarus/Verilator bench
@@ -19,7 +19,7 @@ code would notice a difference.  Verilator is used only to build the RTL side:
 
 ```bash
 # design repo; MSYS2 UCRT64 on Windows, or Linux with verilator on PATH
-bash consolidator_v2/verilator/build_rtl_emulator.sh     # -> Software Emulator/build/test_app/Release/ionm_emu_rtl[.exe]
+bash consolidator/verilator/build_rtl_emulator.sh     # -> Software Emulator/build/test_app/Release/ionm_emu_rtl[.exe]
 ```
 
 The runner speaks the protocol directly (stdlib only, no shim, no pywin32):

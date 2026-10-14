@@ -7,7 +7,7 @@
 // far beyond any simulation; SIM_SHORT_WD makes it 512 cycles (~25 us at
 // 20.48 MHz), so a bite is 4 half-periods = ~100 us after the last pet.
 //
-// Contract under test (watchdog_con.v, consolidator_v2_top.v, reg_map_v2.v,
+// Contract under test (watchdog_con.v, consolidator_top.v, reg_map_v2.v,
 // telemetry_v3_software_contract.md §5):
 //   * arming is the FIRST WD_PET (0x0052) write with wdata[0]=1; there is no
 //     WD_EN register (0x0054 is reserved).  WD_STS (0x0053): bit2 armed,

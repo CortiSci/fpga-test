@@ -19,7 +19,7 @@
 //
 // COMPILE INSTEAD OF:
 //   Tail FPGA/src/rtl/frame_counter.v
-//   consolidator_v2/src/rtl/frame_counter.v
+//   consolidator/src/rtl/frame_counter.v
 // (see test_spi_ping_prod_tail.do)
 `timescale 1ns/1ps
 

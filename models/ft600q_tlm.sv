@@ -66,7 +66,7 @@ module ft600q_tlm #(
     localparam int          CTRL_FRAME_LEN = 4;
     // Telemetry frame length: 37 for the V1/V2 37-word format (default), 4103
     // for the V3 format (header + 4096 data + 4 phase + 2 CRC).  Overridden by
-    // the consolidator_v2 testbench; production testbenches keep the default.
+    // the consolidator testbench; production testbenches keep the default.
     // Capture ring.  16384 held <4 V3 frames: a bench that issues a USB command
     // WHILE streaming waits ~1 frame per response (cmd_decoder holds it to the
     // inter-frame gap), so one SPI transaction let ~6 frames arrive, the ring

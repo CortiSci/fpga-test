@@ -3,7 +3,7 @@
 // tb_rotation.sv — sweep-marker anchoring for spi_ch_stream.v
 //
 // Regression for the "clean ACED but garbage sensor data" failure of
-// 2026-09-08/09 (see consolidator_v2/docs/rotation_regression_geoff_green.md).
+// 2026-09-08/09 (see consolidator/docs/rotation_regression_geoff_green.md).
 //
 // The failure: a leg's 1024 samples arrive as raw bit-planes and the host
 // groups them in 16s to transpose.  If the leg comes up mid-sweep, or slips a

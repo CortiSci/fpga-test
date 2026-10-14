@@ -1,5 +1,5 @@
 // ============================================================
-// tb_bist.sv — Standalone BIST verification for tail_fpga_small
+// tb_bist.sv — Standalone BIST verification for tail_core
 //
 // Tests the asic_self_test circuit end-to-end through the tail's
 // serial transmit path.
@@ -43,7 +43,7 @@
 //   (long pre-stream idle) and all subsequent calls (2-cycle TX_IDLE gap).
 //
 // Run from QuestaSim GUI:
-//   do "…/tail_fpga_small/scripts/sim_bist.do"   then: run -all
+//   do "…/tail_core/scripts/sim_bist.do"   then: run -all
 // ============================================================
 `timescale 1ns/100ps
 
@@ -90,7 +90,7 @@ module tb_bist;
     // DUT instantiation
     // =========================================================================
 
-    tail_fpga_small dut (
+    tail_core dut (
         .RO1_SD               (ro1_sd),
         .RO1_FRAME            (ro1_frame),
         .RO1_CLK              (ro1_clk),
@@ -299,7 +299,7 @@ module tb_bist;
         repeat (4) @(posedge sclk);
 
         $display("=============================================================");
-        $display(" TB-BIST  tail_fpga_small BIST Self-Test Verification");
+        $display(" TB-BIST  tail_core BIST Self-Test Verification");
         $display("=============================================================");
 
         // ==================================================================

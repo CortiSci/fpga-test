@@ -3,7 +3,7 @@
 
 Stream the SAME sample file (and the SAME impedance file) through
 ionm_emulator.exe (pure C++ model) and ionm_emu_rtl.exe (Verilator-compiled
-consolidator_v2 + 4x tail_fpga_small), drive both with the SAME host command
+consolidator + 4x tail_core), drive both with the SAME host command
 sequence, decode what comes out of each with the SAME parser, and report where
 they differ.  The purpose is to verify that the software emulator behaves like
 the RTL — not to verify the RTL itself.
@@ -16,7 +16,7 @@ so neither simulator can host it; the RTL side is already a Verilator build.  So
 the comparison is made at the pipe, by a host, exactly where application code
 would see a difference.  Verilator is used only to BUILD the RTL side:
 
-    consolidator_v2/verilator/build_rtl_emulator.sh      (MSYS2 UCRT64)
+    consolidator/verilator/build_rtl_emulator.sh      (MSYS2 UCRT64)
 
 Both processes speak the same protocol, so no shim DLL is involved:
 
@@ -365,7 +365,7 @@ class Host:
 
 
 # =============================================================================
-# Frame decode — the software contract (consolidator_v2/docs/telemetry_v3_software_contract.md)
+# Frame decode — the software contract (consolidator/docs/telemetry_v3_software_contract.md)
 # =============================================================================
 def crc32_ieee_bigendian_words(words: list[int]) -> int:
     # CRC-32/IEEE 802.3 over words[0..4102], each word fed high byte first.

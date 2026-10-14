@@ -1,15 +1,15 @@
 # ============================================================
 # QuestaSim Regression: V2 spi_master + Production Tail FPGA SPI Ping
-# Location : consolidator_v2/scripts/test_spi_ping_prod_tail.do
+# Location : consolidator/scripts/test_spi_ping_prod_tail.do
 # Invoked from QuestaSim GUI:
-#   do "C:/.../consolidator_v2/scripts/test_spi_ping_prod_tail.do"
+#   do "C:/.../consolidator/scripts/test_spi_ping_prod_tail.do"
 #   run -all
 #
 # Purpose:
 #   Regression-verify that V2 spi_master timing/functionality changes
 #   produce correct PING (0xAA) → PING_ACK (0x55) behaviour when driving
 #   the REAL production Tail FPGA RTL (record_tail_fpga.v / spi_cmd_decoder.v /
-#   user_spi_slave.v) rather than the simplified tail_fpga_small stub.
+#   user_spi_slave.v) rather than the simplified tail_core stub.
 #
 #   Only SP-01..SP-04 run (+define+RUN_SPI_PING).  Full test suite
 #   (telemetry, ASIC acquisition) is not exercised because:
@@ -19,14 +19,14 @@
 #   in the FPGA_SPI_SCLK domain and is independent of sys_clk.
 #
 # frame_counter conflict resolved via frame_counter_combined.v:
-#   Both consolidator_v2 and record_tail_fpga define module "frame_counter"
+#   Both consolidator and record_tail_fpga define module "frame_counter"
 #   with different port lists.  frame_counter_combined.v declares ALL ports
 #   from both versions (names are disjoint) and implements both behaviours
 #   in separate always blocks.  The dormant block's clock (unconnected → Z)
 #   never generates posedge events, so only the connected block runs.
 #   Do NOT compile either original frame_counter.v in this script.
 #
-# prod_tail_wrap.v exposes record_tail_fpga under the name tail_fpga_small
+# prod_tail_wrap.v exposes record_tail_fpga under the name tail_core
 #   so tb_top.sv instantiation is unchanged.
 # ============================================================
 
@@ -37,7 +37,7 @@ set DEFINES "+define+RUN_SPI_PING"
 if {$USE_PLL_STUB} { append DEFINES " +define+USE_PLL_STUB" }
 
 # ---- Path declarations (8.3 short-names to remove OneDrive spaces) ----------
-set PROJ_ROOT    "C:/Users/geoff/OneDrive/DOCUME~1/python/FDA510~1/FPGADE~1/IONM-A~1/consolidator_v2"
+set PROJ_ROOT    "C:/Users/geoff/OneDrive/DOCUME~1/python/FDA510~1/FPGADE~1/IONM-A~1/consolidator"
 set SCRIPT_DIR   "$TEST_ROOT/consolidator/scripts"
 set SIM_DIR      "$PROJ_ROOT/src/sim"
 set RTL_CON      "$PROJ_ROOT/src/rtl"
@@ -92,7 +92,7 @@ vlog -work work $DEFINES "$RTL_TAIL/spi_cmd_decoder.v"
 vlog -work work $DEFINES "$RTL_TAIL/drdy_monitor.v"
 vlog -work work $DEFINES "$RTL_TAIL/record_tail_fpga.v"
 
-# Wrapper: exposes record_tail_fpga as tail_fpga_small (tb_top instantiation unchanged)
+# Wrapper: exposes record_tail_fpga as tail_core (tb_top instantiation unchanged)
 vlog -work work $DEFINES "$V2_MODELS/prod_tail_wrap.v"
 
 # ---- V2 Consolidator RTL — read from rtl_files.f (single source of truth) ----

@@ -10,7 +10,7 @@ module tb_buffered_control_link;
 `else
     localparam MODE=1, CAPABILITIES=7;
 `endif
-    spi_slave_small #(.EXTENDED_CONTROLS(MODE)) spi (
+    tail_spi_slave #(.EXTENDED_CONTROLS(MODE)) spi (
         .sclk(sclk),.rst_n(rst),.mosi(mosi),.ss_n(ss),.spi_miso_ff(miso),
         .ctrl_reg(controls),.telem_en(),.cs1_pass_set(),.cs2_pass_set(),
         .soft_reset(),.test_en(),.watchdog_fault(fault),.control_toggle(ct),
