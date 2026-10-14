@@ -187,7 +187,9 @@ module tb_top;
 
             wire mclk_en_w;
 
-`ifdef BUFFERED_TAIL_CAPTURE
+`ifdef CONSOLIDATOR_PULL_LINK
+            tail_fpga_small #(.BUFFERED_CAPTURE(2)) dut_tail (
+`elsif BUFFERED_TAIL_CAPTURE
             tail_fpga_small #(.BUFFERED_CAPTURE(1)) dut_tail (
 `else
             tail_fpga_small dut_tail (

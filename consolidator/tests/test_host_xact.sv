@@ -119,6 +119,12 @@ task automatic hx_judge_leg(input int frame_no, input int uch, output int verdic
         phw     = hx_phase[uch];
         flagged = (|(phw[14:12] & hx_excuse_mask[2:0])) ? 1 : 0;
         ph      = phw & 16'h03FF;
+        // The USB contract uses phase=1023 for an unavailable leg. A queued
+        // frame captured during RUN=0 may be read after RUN=1 was acknowledged.
+        // Accept only zero-filled unavailable slots, never as clean recovery.
+        n_zero=0;
+        for (w=0; w<1024; w++)
+            if (hx_data[4*w+uch] === 16'h0000) n_zero++;
         matched = hx_leg_match(uch);
         plane_off = (matched < 0) ? -1 : matched % 16;
         samp_off  = (matched < 0) ? -1 : (matched / 16) % 64;
@@ -129,6 +135,9 @@ task automatic hx_judge_leg(input int frame_no, input int uch, output int verdic
         // Flags only EXCUSE wrong data.
         if (matched >= 0 && plane_off == 0 && samp_off == ph) begin
             verdict = 0;
+        end else if (ph==1023 && n_zero==1024) begin
+            verdict=1;
+            $display("[SA-HOSTXACT] frame[%0d] leg%0d: explicitly unavailable, zero-filled",frame_no,uch);
         end else if (flagged) begin
             verdict = 1;
             $display("[SA-HOSTXACT] frame[%0d] leg%0d: flagged (phase word 0x%04h) — data excused (plane_offset=%0d sample_offset=%0d)",

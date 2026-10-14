@@ -112,9 +112,15 @@ task automatic run_DEAD_LEG_CEILING();
     localparam logic [3:0] MASK           = 4'hF;   // all four enabled, as recorded
     localparam int         DEAD_CH        = 2;      // LEG7: enabled, TELEM_EN on, ASIC clock never runs
     localparam logic [3:0] HEALTHY        = 4'hB;   // legs 5, 6, 8
+`ifdef CONSOLIDATOR_PULL_LINK
+    // Three tail banks absorb the old short 2% deficit without loss. Increase
+    // the deficit rather than extending simulation until that storage fills.
+    localparam int         DRAIN_X1000    = 135;
+`else
     localparam int         DRAIN_X1000    = 152;    // the host's High-Speed ceiling as recorded, ~20.1 MB/s
                                                     //   (words per 66 MHz cycle x1000; the engine fills at 155.5
                                                     //   = 20.5 MB/s) -> a steady ~2 % deficit, smooth host, no hiccups
+`endif
     localparam int         DEFICIT_LEADIN = 25;     // unjudged frames for the FT600's 2048-word credit to run out
                                                     //   (2048 / 3.5e-3 words/cycle ~ 9 ms) and the spill cadence to settle
     // Keep the full FT600 credit and lead-in, but avoid the old 60-frame

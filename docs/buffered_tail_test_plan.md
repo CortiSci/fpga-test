@@ -157,3 +157,30 @@ The three-bank ownership variant and the final USB-admission change have
 additional targeted pass results. The host emulator targets are not included
 in that verdict; the exploratory combined run had failures against prebuilt
 host binaries. Do not substitute the RTL result for emulator qualification.
+
+## Pull transport acceptance
+
+`CONSOLIDATOR_PULL_LINK` selects the pull receiver and three-bank tail transport
+in the common board bench. Preserve payload/CRC and bounded-recovery checks for
+BIST, restart, impedance, delayed links, USB stalls, paused tails and dead tails.
+`tail_pull_control_link` verifies capability bit 3 alongside the existing local
+controls/watchdog behavior; the compatible tail retains capability mask 0x07.
+
+Two focused benches cover the actual new datapath without full USB setup:
+
+- `tail_pull_link`: arbitrary bank/word identity, delayed pins, flow-control
+  reserve, source overrun, a short SS pulse, injected parity error and recovery,
+  plus steady 2,500-sweep/s delivery. A short SS pulse originally skipped word 51;
+  gating buffer reads with SS fixes the reproduced failure.
+- `consolidator_pull_throughput`: real tails/receivers, shared aggregation RAM,
+  assembler and bytewise CRC with one armed absent tail. Check ordered payload,
+  unavailable zero slots, reported sequence gaps, monotonically increasing
+  timestamps, CRC and ten frames in 4 ms. Stopping a participating leg partway
+  through a frame must set the incomplete-frame flag. The first design took
+  8 ms for ten frames because it repeated dead-leg discovery for every frame.
+
+The host oracle accepts phase 1023 as unavailable only for a wholly zero-filled
+leg; it is never counted as clean recovery. Partially filled stopped legs still
+require an error flag. The stronger pull deficit configuration (135/1000 drain)
+exhausts the new tail storage within the existing window; the original recorded
+152/1000 condition remains unchanged for the old transport.

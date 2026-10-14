@@ -5,7 +5,12 @@ module tb_buffered_control_link;
     wire [4:0] controls;
     integer passes=0;
     always #24.414 clk=~clk;
-    spi_slave_small #(.EXTENDED_CONTROLS(1)) spi (
+`ifdef PULL_LINK
+    localparam MODE=2, CAPABILITIES=15;
+`else
+    localparam MODE=1, CAPABILITIES=7;
+`endif
+    spi_slave_small #(.EXTENDED_CONTROLS(MODE)) spi (
         .sclk(sclk),.rst_n(rst),.mosi(mosi),.ss_n(ss),.spi_miso_ff(miso),
         .ctrl_reg(controls),.telem_en(),.cs1_pass_set(),.cs2_pass_set(),
         .soft_reset(),.test_en(),.watchdog_fault(fault),.control_toggle(ct),
@@ -34,7 +39,7 @@ module tb_buffered_control_link;
     endtask
     initial begin
         rst=1;#1;rst=0;#1;ss=1;#10; repeat(3) @(negedge clk);rst=1;
-        command(7,0);check(response==7,"discover buffered capture, independent controls and watchdog");
+        command(7,0);check(response==CAPABILITIES,"discover buffered capture, independent controls and watchdog");
         command(1,8'h1f);check(ro && mclk && test_sig && !shdn && led,"atomic control write");
         command(1,8'h15);check(ro && mclk && test_sig && shdn && !led,"test enabled without amplifier");
         command(1,8'h19);check(ro && mclk && !test_sig && !shdn,"amplifier enabled without test");
