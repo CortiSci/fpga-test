@@ -177,6 +177,34 @@ task automatic spi_cfg_xact_packed(
 `endif
 endtask
 
+// Tail executes all 24 ASIC clocks; configuration BUSY is only transport status.
+task automatic spi_local_asic_write(input logic [1:0] ch_sel,
+                                    input logic selector,input logic [23:0] payload);
+    logic [15:0] m,f,a,d;
+    logic [47:0] rx;
+    integer polls;
+    tb_top.u_ft600q.send_command_frame(CMD_MAGIC,flags_wr(),REG_SPI_CFG_DATA,{8'h0a,7'b0,selector});
+    tb_top.u_ft600q.wait_response_frame_typed(m,f,a,d);
+    tb_top.u_ft600q.send_command_frame(CMD_MAGIC,flags_wr(),REG_SPI_CFG_DATA2,payload[23:8]);
+    tb_top.u_ft600q.wait_response_frame_typed(m,f,a,d);
+    tb_top.u_ft600q.send_command_frame(CMD_MAGIC,flags_wr(),REG_SPI_CFG_DATA3,{payload[7:0],8'b0});
+    tb_top.u_ft600q.wait_response_frame_typed(m,f,a,d);
+    tb_top.u_ft600q.send_command_frame(CMD_MAGIC,flags_wr(),REG_SPI_CFG_CTRL,spi_cfg_ctrl_word(ch_sel,1'b1,1'b1,3'd5));
+    tb_top.u_ft600q.wait_response_frame_typed(m,f,a,d);
+    polls=0;
+    do begin
+        #30000;
+        tb_top.u_ft600q.send_command_frame(CMD_MAGIC,flags_rd(),REG_SPI_CFG_CTRL,0);
+        tb_top.u_ft600q.wait_response_frame_typed(m,f,a,d);polls++;
+    end while(d[3] && polls<16);
+    if(d[3]) $fatal(1,"ASIC submission transport timeout");
+    polls=0;
+    do begin
+        spi_cfg_xact_packed(ch_sel,48'h0b0000000000,3,rx);polls++;
+    end while(rx[24] && polls<16);
+    if(rx[31:24]!==8'h02) $fatal(1,"ASIC completion rejected/aborted/timeout: %h",rx[31:24]);
+endtask
+
 // CU-02: Fault monitor falling-edge detect → fault_latch set
 // cmd_decoder emits a spontaneous interrupt frame when fault_trig fires;
 // consume it before reading the register.

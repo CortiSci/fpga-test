@@ -33,15 +33,15 @@ module tb_asic_routing;
         check(edges==24 && captured==24'h95ac31 && cs0 && cs1,"local ASIC payload reaches board pins");
         cmd('h0b,0);check(rx==2 && dut.telem_active,"stream becomes eligible only after configuration completes");
         cmd(2,0);check(!dut.telem_active,"stream stop still works");
-        // Relay payload opcode 0A must not be mistaken for a local response.
+        // Removed relay opcodes must never select or clock the ASIC.
         cmd(3,0);
         #10;sclk=1;#10;sclk=0;#10; // relay arm priming edge with SS high
         edges=0;captured=0;ss=0;#10;
         byte_xfer('h0a);byte_xfer('h76);byte_xfer('h53);
-        check(rx==8'hff,"legacy ASIC MISO takes priority over local opcode decoder");
+        check(cs0 && cs1,"old relay command cannot select ASIC");
         ss=1;#20;sclk=1;#10;sclk=0;
-        check(edges==24 && captured==24'h0a7653,"legacy 24-bit relay remains intact");
-        #40000;check(edges==24,"relay payload is not executed again locally");
+        check(edges==0,"raw relay payload cannot clock ASIC");
+        #40000;check(edges==0,"truncated local-looking payload has no effect");
         $display("RESULTS: %0d passed, 0 failed",passes);$display("STATUS: PASS");$finish;
     end
     initial begin #200000;$fatal(1,"timeout");end

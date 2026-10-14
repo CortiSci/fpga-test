@@ -202,3 +202,14 @@ exhausts the new tail storage within the existing window; the original recorded
 The old relay is retained; host applications have not been migrated automatically.
 A status read must distinguish transport completion from ASIC completion. Hardware
 qualification must confirm electrical timing, register readback and abort behavior.
+
+
+### Default local ASIC command path
+
+The upgraded tail has no transparent relay. `tail_asic_routing` now requires zero
+ASIC clock edges after retired arm commands and a raw payload. The board USB test
+submits five bytes in write mode and polls local completion. Its fast variant
+`consolidator_local_asic_fast` covers host clock dividers 0, 1 and 2 (1,332 checks);
+the normal variant covers divider 31 (444 checks). The ASIC clock remains 640 kHz.
+Pull impedance-cycle variants stop capture, execute the local pixel write, require
+completion, and restart before applying the existing strict frame/CRC oracle.

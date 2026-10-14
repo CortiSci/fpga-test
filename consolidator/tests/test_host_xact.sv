@@ -1109,8 +1109,13 @@ task automatic run_IMP_CYCLE();
         ic_cmd(flags_wr(), 16'h0100, 16'h0000, "RUN=0");
         // the tool's asicPassthroughWrite: CS2_PASS then the 3-byte pixel word,
         // then TELEM_EN, mask, RUN — each a register write pair answered in turn
+`ifdef CONSOLIDATOR_PULL_LINK
+        cfg_write2(2'd0, 8'h02, 8'h00);                 // stop tail capture before local configuration
+        spi_local_asic_write(2'd0,1'b1,24'hc51101);
+`else
         cfg_write2(2'd0, 8'h04, 8'h00);                 // CS2_PASS
         cfg_write3(2'd0, 8'hC5, 8'h11, 8'h01);          // Pixel {C5 11 01}
+`endif
         cfg_write2(2'd0, 8'h02, 8'h01);                 // TELEM_EN normal
         ic_cmd(flags_wr(), REG_SPI_EN_MASK, 16'h0009, "SPI_EN_MASK");
         ic_cmd(flags_wr(), 16'h0100, 16'h0001, "RUN=1");
