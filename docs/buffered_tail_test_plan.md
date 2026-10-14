@@ -2,7 +2,7 @@
 
 Draft, 2026-10-14. Branch `rev2`, starting test revision `d4c86b0`. These are
 planned tests, not registered targets, simulation results or hardware evidence.
-The design branch owns the [architecture proposal](../../docs/design-arch-details/rev2_architecture.md)
+The design branch owns the [architecture proposal](../../docs/design-arch-details/buffered_tail_architecture.md)
 when this repository is mounted at `IONM-A-FPGA/fpga-test`.
 
 ## Verification boundaries
@@ -27,22 +27,22 @@ the existing RESULTS/STATUS contract and fail on missing completion or assertion
 
 | Proposed target | Step | Stimulus | Required observation |
 | --- | --- | --- | --- |
-| `rev2_tail_capture_identity` | R2-02 | Distinct signed samples on all 16 lanes over complete sweeps; frame at several bit offsets | Every captured sample has correct lane/pixel/sweep identity; partial startup sweep excluded |
-| `rev2_tail_buffer_ownership` | R2-02 | Fill both banks; read slowly; start a third sweep; stop at every burst boundary | No overwrite of a bank being read; whole incoming sweep dropped when full; exact overrun count; oldest complete data retained |
-| `rev2_tail_buffer_cdc` | R2-02 | Independent clocks, phase offsets, wraps, reset of each domain and clock pauses | Coherent payload/metadata ownership; no phantom full/empty release or stale epoch after reset |
-| `rev2_tail_controls` | R2-03 | Toggle each control and combinations with unrelated bits set; reset mid-command | Independent amplifier/test controls; preserved bits; documented physical levels and atomic CDC; safe reset values |
-| `rev2_tail_watchdog` | R2-03 | Valid pet, truncated/invalid pet, no pet, stopped SPI, stalled ASIC clock, repeated expiry | Expiry independent of SPI/ASIC activity; output safe-state bound; retained cause; deterministic restart; link traffic alone cannot mask missing host health |
-| `rev2_capability_mismatch` | R2-03 | Current small-tail, supported Rev 2, unknown versions and mixed legs | Explicit compatibility decision before run; no accidental legacy opcode execution |
-| `rev2_tail_burst_protocol` | R2-04 | Empty/busy reply, minimum/maximum/oversized length, interrupted read, retry, sequence wrap | No OOB memory access; ownership changes only at defined commit; bounded errors; retry does not duplicate published data |
-| `rev2_board_stream_identity` | R2-04 | Four real tails, independent skew and source identity, host stalls | Correct USB reconstruction and capture association at 2,500 samples/s/channel; no false validity on absent data |
-| `rev2_board_pause_recovery` | R2-04 | Pause below/at/above free buffer capacity at multiple word positions | Loss-free within demonstrated capacity; explicit whole-sweep drops beyond it; return to clean aligned acquisition |
-| `rev2_board_dead_leg` | R2-04 | Remove one leg mid-burst, halt source clock, reset it, rejoin with new epoch | Healthy legs make bounded progress; missing leg marked invalid; no cross-leg epoch mixing or indefinite wait |
-| `rev2_board_restart` | R2-04 | Start/stop/reset during capture, partial command and host backpressure | No stale sample publication; commands complete/fail within bound; repeatable next start |
-| `rev2_tail_asic_transactions` | R2-05 | Both chip selects, supported lengths/rates, delayed completion, stuck busy and abort | Correct ASIC payload/readback; bounded status; no interference with buffer ownership |
-| `rev2_impedance_transition` | R2-05 | Baseline telemetry to impedance and back, even/odd lanes, retries and repeated pixel selections | Correct T0/T1 and sensor identity; explicit data-valid boundary; dwell excludes stale/pre-switch samples; stop always bounded |
-| `rev2_tail_adc` | R2-06 | Known positive/negative/extreme conversion values, DRDY, NACK and stuck bus | Correct agreed width/sign/scaling; valid/age flags; bounded timeout and recovery; no stale result presented as fresh |
-| `rev2_tail_i2c_arbitration` | R2-06 | Concurrent DRDY auto-read and diagnostic command | One bus owner, bounded service, no mixed conversions; disabled/unsupported host access fails explicitly |
-| `rev2_fault_accounting` | R2-07 | Overruns, invalid lengths, dead legs, resets and USB admission loss | Per-source counters exact and saturating/wrapping as specified; atomic snapshots; event survives until defined acknowledgement |
+| `buffered_tail_capture_identity` | R2-02 | Distinct signed samples on all 16 lanes over complete sweeps; frame at several bit offsets | Every captured sample has correct lane/pixel/sweep identity; partial startup sweep excluded |
+| `tail_buffer_ownership` | R2-02 | Fill both banks; read slowly; start a third sweep; stop at every burst boundary | No overwrite of a bank being read; whole incoming sweep dropped when full; exact overrun count; oldest complete data retained |
+| `buffered_tail_buffer_cdc` | R2-02 | Independent clocks, phase offsets, wraps, reset of each domain and clock pauses | Coherent payload/metadata ownership; no phantom full/empty release or stale epoch after reset |
+| `tail_local_controls` | R2-03 | Toggle each control and combinations with unrelated bits set; reset mid-command | Independent amplifier/test controls; preserved bits; documented physical levels and atomic CDC; safe reset values |
+| `tail_local_watchdog` | R2-03 | Valid pet, truncated/invalid pet, no pet, stopped SPI, stalled ASIC clock, repeated expiry | Expiry independent of SPI/ASIC activity; output safe-state bound; retained cause; deterministic restart; link traffic alone cannot mask missing host health |
+| `buffered_capability_mismatch` | R2-03 | Current small-tail, supported Rev 2, unknown versions and mixed legs | Explicit compatibility decision before run; no accidental legacy opcode execution |
+| `buffered_tail_burst_protocol` | R2-04 | Empty/busy reply, minimum/maximum/oversized length, interrupted read, retry, sequence wrap | No OOB memory access; ownership changes only at defined commit; bounded errors; retry does not duplicate published data |
+| `buffered_board_stream_identity` | R2-04 | Four real tails, independent skew and source identity, host stalls | Correct USB reconstruction and capture association at 2,500 samples/s/channel; no false validity on absent data |
+| `buffered_board_pause_recovery` | R2-04 | Pause below/at/above free buffer capacity at multiple word positions | Loss-free within demonstrated capacity; explicit whole-sweep drops beyond it; return to clean aligned acquisition |
+| `buffered_board_dead_leg` | R2-04 | Remove one leg mid-burst, halt source clock, reset it, rejoin with new epoch | Healthy legs make bounded progress; missing leg marked invalid; no cross-leg epoch mixing or indefinite wait |
+| `buffered_board_restart` | R2-04 | Start/stop/reset during capture, partial command and host backpressure | No stale sample publication; commands complete/fail within bound; repeatable next start |
+| `buffered_tail_asic_transactions` | R2-05 | Both chip selects, supported lengths/rates, delayed completion, stuck busy and abort | Correct ASIC payload/readback; bounded status; no interference with buffer ownership |
+| `buffered_impedance_transition` | R2-05 | Baseline telemetry to impedance and back, even/odd lanes, retries and repeated pixel selections | Correct T0/T1 and sensor identity; explicit data-valid boundary; dwell excludes stale/pre-switch samples; stop always bounded |
+| `buffered_tail_adc` | R2-06 | Known positive/negative/extreme conversion values, DRDY, NACK and stuck bus | Correct agreed width/sign/scaling; valid/age flags; bounded timeout and recovery; no stale result presented as fresh |
+| `buffered_tail_i2c_arbitration` | R2-06 | Concurrent DRDY auto-read and diagnostic command | One bus owner, bounded service, no mixed conversions; disabled/unsupported host access fails explicitly |
+| `buffered_fault_accounting` | R2-07 | Overruns, invalid lengths, dead legs, resets and USB admission loss | Per-source counters exact and saturating/wrapping as specified; atomic snapshots; event survives until defined acknowledgement |
 
 If tail transpose is selected, add an identity bench that checks sample ordering
 against an independent ASIC model, including negative values and impedance packing;
@@ -113,3 +113,13 @@ R2-01 through R2-08 are planned. No new RTL targets are registered by this docum
 no Rev 2 simulation, fit, timing or hardware pass is claimed. Initial implementation
 requires the as-built parts/pinout and the buffered-link contract described in the
 architecture proposal.
+
+## Implemented component tests
+
+Registered in the design runner: `tail_buffer_ownership`, `tail_local_controls`,
+and `tail_local_watchdog`. These cover production-depth buffer ownership with
+asynchronous clocks, partial/full-buffer loss and restart, independent outputs,
+watchdog command priority and the exact production timeout cycle. They pass
+18,450 assertions. Three deliberate defects (occupied-bank overwrite, one-cycle
+late timeout and coupled amplifier/test controls) each fail the corresponding
+bench. Integration and board-level acceptance remain open.
