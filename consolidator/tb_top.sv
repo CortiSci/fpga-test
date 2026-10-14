@@ -187,7 +187,11 @@ module tb_top;
 
             wire mclk_en_w;
 
+`ifdef BUFFERED_TAIL_CAPTURE
+            tail_fpga_small #(.BUFFERED_CAPTURE(1)) dut_tail (
+`else
             tail_fpga_small dut_tail (
+`endif
                 .RO1_SD                 (ro1_sd[ch]),
                 .RO1_FRAME              (ro1_frame[ch]),
                 .RO1_CLK                (ro1_clk[ch]),

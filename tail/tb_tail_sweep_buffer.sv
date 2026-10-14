@@ -8,7 +8,12 @@ module tb_tail_sweep_buffer;
     integer passes=0;
     always #5 wc=~wc;
     always #7 rc=~rc;
-    tail_sweep_buffer dut(rst_n,wc,valid,start,data,drops,rc,take,available,result,seq,last);
+`ifdef THREE_SWEEP_BANKS
+    localparam BANKS=3;
+`else
+    localparam BANKS=2;
+`endif
+    tail_sweep_buffer #(.BANKS(BANKS)) dut(rst_n,wc,valid,start,data,drops,rc,take,available,result,seq,last);
     task check(input bit ok,input string name);
       if (!ok) $fatal(1,"FAIL: %s",name);
       passes++;
@@ -37,20 +42,20 @@ module tb_tail_sweep_buffer;
     endtask
     initial begin
       #2; repeat(3) @(negedge wc); rst_n=1;
-      send(0,1024); send(1,1024); send(2,1024);
+      for(integer bank=0;bank<=BANKS;bank++) send(bank,1024);
       check(drops==1,"full buffer drops incoming sweep");
-      receive(0,0); receive(1,1);
+      for(integer bank=0;bank<BANKS;bank++) receive(bank,bank);
       repeat(4) @(negedge wc);
       check(!available,"no publication for discarded sweep");
-      send(3,300);
+      send(BANKS+1,300);
       repeat(4) @(negedge rc);
       check(!available,"partial sweep never visible");
-      send(4,1024); receive(4,4);
+      send(BANKS+2,1024); receive(BANKS+2,BANKS+2);
       check(drops==2,"interrupted partial sweep counted");
       repeat(4) @(negedge wc);
       fork
-        begin send(5,1024); send(6,1024); end
-        begin receive(5,5); receive(6,6); end
+        begin send(BANKS+3,1024); send(BANKS+4,1024); end
+        begin receive(BANKS+3,BANKS+3); receive(BANKS+4,BANKS+4); end
       join
       check(drops==2,"overlapped clocks preserve ownership");
       @(negedge wc); rst_n=0;

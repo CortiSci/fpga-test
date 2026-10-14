@@ -9,7 +9,14 @@ module tb_usb_duplex_fuzz;
  wire [15:0] bus_data,mover_data,rx_data,tx_head,tx_data,addr,wdata;
  wire [1:0] be;
  wire rxf,txe,rd,wr,oe,mover_valid,full,almost,empty,rx_ready;
- assign be=oe ? 2'b11 : 2'bzz;
+ wire [1:0] be_enable;
+ assign be[0]=be_enable[0] ? 1'b1 : 1'bz;
+ assign be[1]=be_enable[1] ? 1'b1 : 1'bz;
+`ifdef REGIONAL_USB_ENABLE
+ localparam REGIONAL=1;
+`else
+ localparam REGIONAL=0;
+`endif
  wire tx_valid,tx_full,tx_empty,tx_pop,reg_we;
  wire [9:0] tx_level;
  wire mover_ready=!full&&!almost;
@@ -18,7 +25,7 @@ module tb_usb_duplex_fuzz;
  reg [4:0] fault_src=0; reg framer_busy=0;
  wire [15:0] rdata=registers[addr[4:0]];
  ft600q_tlm model(.clk_66m(usb_clk),.rst_n(rst_n),.usb_fifo_d(bus_data),.usb_fifo_be(be),.rxf_n(rxf),.txe_n(txe),.rd_n(rd),.wr_n(wr),.oe_n(oe));
- ft600_245_fifo_fsm #(.PHASED_OUTPUT(1)) mover(.usb_fifo_clk(usb_clk),.usb_launch_clk(launch_clk),.devrst_n(rst_n),.usb_fifo_d(bus_data),.usb_fifo_rxf_n(rxf),.usb_fifo_txe_n(txe),.usb_fifo_rd_n(rd),.usb_fifo_wr_n(wr),.usb_fifo_oe_n(oe),.cmd_out_data(mover_data),.cmd_out_valid(mover_valid),.cmd_out_ready(mover_ready),.tx_in_data(tx_head),.tx_in_valid(!tx_empty),.tx_in_ready(tx_pop),.tx_in_queued_words(tx_level),.telemetry_active(1'b0),.tx_source_idle(1'b1),.dbg_state());
+ ft600_245_fifo_fsm #(.PHASED_OUTPUT(1),.REGIONAL_ENABLE(REGIONAL)) mover(.usb_fifo_clk(usb_clk),.usb_launch_clk(launch_clk),.devrst_n(rst_n),.usb_fifo_d(bus_data),.usb_fifo_rxf_n(rxf),.usb_fifo_txe_n(txe),.usb_fifo_rd_n(rd),.usb_fifo_wr_n(wr),.usb_fifo_oe_n(oe),.cmd_out_data(mover_data),.cmd_out_valid(mover_valid),.cmd_out_ready(mover_ready),.tx_in_data(tx_head),.tx_in_valid(!tx_empty),.tx_in_ready(tx_pop),.tx_in_queued_words(tx_level),.telemetry_active(1'b0),.tx_source_idle(1'b1),.dbg_state(),.byte_enable_n(be_enable));
  cdc_fifo #(.WIDTH(16),.DEPTH_LOG2(5)) rx_fifo(.wr_clk(usb_clk),.wr_rst_n(rst_n),.wr_data(mover_data),.wr_en(mover_valid),.wr_full(full),.wr_almost_full(almost),.wr_half_full(),.rd_clk(core_clk),.rd_rst_n(rst_n),.rd_data(rx_data),.rd_en(!empty&&rx_ready),.rd_empty(empty),.rd_level());
  telem_tx_fifo tx_fifo(.wr_clk(core_clk),.wr_rst_n(rst_n),.wr_data(tx_data),.wr_en(tx_valid&&!tx_full),.wr_full(tx_full),.wr_almost_full(),.wr_half_full(),.rd_clk(usb_clk),.rd_rst_n(rst_n),.rd_data(tx_head),.rd_en(tx_pop&&!tx_empty),.rd_empty(tx_empty),.rd_level(tx_level));
  cmd_decoder decoder(.clk(core_clk),.rst_n(rst_n),.rx_data(rx_data),.rx_valid(!empty),.rx_ready(rx_ready),.tx_data(tx_data),.tx_valid(tx_valid),.tx_ready(!tx_full),.reg_addr(addr),.reg_wdata(wdata),.reg_we(reg_we),.reg_rdata(rdata),.parity_events(4'b0),.fault_src(fault_src),.fault_frame_sent(),.fault_flags_sent(),.framer_busy(framer_busy),.ctrl_early());

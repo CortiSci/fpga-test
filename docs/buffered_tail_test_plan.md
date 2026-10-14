@@ -109,10 +109,9 @@ real-consolidator robustness. Previously deferred instrumentation work remains o
 
 ## Current status
 
-R2-01 through R2-08 are planned. No new RTL targets are registered by this document;
-no Rev 2 simulation, fit, timing or hardware pass is claimed. Initial implementation
-requires the as-built parts/pinout and the buffered-link contract described in the
-architecture proposal.
+Component and buffered-tail integration targets are now registered. The explicit
+descriptor link, local ASIC transaction engine and ADC model tests are still open.
+Physical qualification and complete routed board timing are separate gates.
 
 ## Implemented component tests
 
@@ -130,3 +129,31 @@ compatible with the original top-level ports. Both configurations pass 16
 assertions each. Together with eight transport, ownership and watchdog targets,
 the board-porting regression passes 26,253 assertions across ten targets.
 This does not establish routed timing or completion of the buffered protocol.
+
+## Integrated regressions
+
+The common pin-level benches accept `BUFFERED_TAIL_CAPTURE` to instantiate the
+buffered capture/serializer behind the board interface. Registered configurations
+cover four-tail payload/CRC, BIST, start/stop, impedance cycles and bandwidth.
+They retain the original raw-plane, phase, command-response and counter oracles.
+The existing small-tail configurations remain separate baseline tests.
+
+BIST reproduced periodic corrupt/zero-filled data before paced three-bank readout
+(1,362 failed assertions). Restart and impedance tests reproduced stale partial
+serialization after rearm (including a restart timeout and 11 impedance failures).
+After the fixes, BIST passes 12,276 checks, start/stop 12,289 and impedance 67.
+The three-bank ownership variant passes 21,510 checks; the original two-bank
+variant still passes 18,438. The regional USB duplex configuration passes 7,740
+accepted-pin assertions, and bytewise CRC matches the word-parallel reference
+across 64 packet lengths (2,080 assertions).
+
+Protocol changes are authorized. Update transport setup when necessary, but keep
+independent expected samples, ordering, acquisition-rate, loss visibility, bounded
+recovery and fault checks. New descriptor semantics need explicit negative tests
+for malformed length, sequence gaps, stale replies and aborted reads.
+
+The full RTL run on 2026-10-14 passed 64/64 targets and 243,334 assertions.
+The three-bank ownership variant and the final USB-admission change have
+additional targeted pass results. The host emulator targets are not included
+in that verdict; the exploratory combined run had failures against prebuilt
+host binaries. Do not substitute the RTL result for emulator qualification.

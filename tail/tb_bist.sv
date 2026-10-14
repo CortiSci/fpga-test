@@ -309,9 +309,9 @@ module tb_bist;
         @(posedge sclk);
         chk1("test_en  = 0 at reset",   dut.test_en,               1'b0);
         chk1("telem_mode = off at reset",   dut.telem_mode == 2'b00, 1'b1);
-        chk1("st_frame = 0 at reset",   dut.u_self_test.st_frame,  1'b0);
-        chk1("st_clk   = 0 at reset",   dut.u_self_test.st_clk,    1'b0);
-        chk16("st_sd   = 0 at reset",   dut.u_self_test.st_sd,    16'd0);
+        chk1("st_frame = 0 at reset",   dut.live_bist.u_self_test.st_frame,  1'b0);
+        chk1("st_clk   = 0 at reset",   dut.live_bist.u_self_test.st_clk,    1'b0);
+        chk16("st_sd   = 0 at reset",   dut.live_bist.u_self_test.st_sd,    16'd0);
 
         // ==================================================================
         // TC-BIST-02  SPI write opcode 0x06 enables test_en
@@ -346,7 +346,7 @@ module tb_bist;
         repeat(4) @(posedge sclk);
         mosi = 1'b0;
         @(posedge sclk);
-        chk1("arm=1 after MOSI pulse", dut.u_stream_tx.arm, 1'b1);
+        chk1("arm=1 after MOSI pulse", dut.live_capture.u_stream_tx.arm, 1'b1);
 
         // ==================================================================
         // TC-BIST-05  Wait for frame_armed
@@ -361,7 +361,7 @@ module tb_bist;
             timeout = 0;
             // Worst case: arm just after a frame boundary → wait one full frame
             // period = 1024 st_clk cycles = 20480 fast-SCLK.  30000 is 1.5× margin.
-            while (!dut.u_stream_tx.frame_armed && timeout < 30000) begin
+            while (!dut.live_capture.u_stream_tx.frame_armed && timeout < 30000) begin
                 @(posedge sclk);
                 timeout++;
             end
@@ -380,7 +380,7 @@ module tb_bist;
                 begin : wait_w0_bist06
                     integer to_w0;
                     to_w0 = 0;
-                    while (dut.u_stream_tx.tx_state !== 2'd0 && to_w0 < 30) begin
+                    while (dut.live_capture.u_stream_tx.tx_state !== 2'd0 && to_w0 < 30) begin
                         @(posedge sclk);
                         to_w0 = to_w0 + 1;
                     end
@@ -459,9 +459,9 @@ module tb_bist;
         spi_cmd(8'h06, 8'h00);   // SELF_TEST_EN = 0
         @(posedge sclk);
         chk1("test_en  = 0 after disable", dut.test_en,               1'b0);
-        chk1("st_clk   = 0 after disable", dut.u_self_test.st_clk,    1'b0);
-        chk16("st_sd   = 0 after disable", dut.u_self_test.st_sd,    16'd0);
-        chk1("st_frame = 0 after disable", dut.u_self_test.st_frame,  1'b0);
+        chk1("st_clk   = 0 after disable", dut.live_bist.u_self_test.st_clk,    1'b0);
+        chk16("st_sd   = 0 after disable", dut.live_bist.u_self_test.st_sd,    16'd0);
+        chk1("st_frame = 0 after disable", dut.live_bist.u_self_test.st_frame,  1'b0);
 
         // Re-enable: BIST should restart immediately
         spi_cmd(8'h06, 8'h01);   // SELF_TEST_EN = 1
@@ -472,7 +472,7 @@ module tb_bist;
         begin
             integer tmo;
             tmo = 0;
-            while (!dut.u_self_test.st_clk && tmo < 200) begin
+            while (!dut.live_bist.u_self_test.st_clk && tmo < 200) begin
                 @(posedge sclk);
                 tmo++;
             end
@@ -548,7 +548,7 @@ module tb_bist;
                 // Wait for frame_armed (first ro1_frame edge after arm)
                 // Worst case: arm fires just after a pulse → wait one full period (~20480 sclk)
                 to08a = 0;
-                while (!dut.u_stream_tx.frame_armed && to08a < 50000) begin
+                while (!dut.live_capture.u_stream_tx.frame_armed && to08a < 50000) begin
                     @(posedge sclk); to08a = to08a + 1;
                 end
 
@@ -561,7 +561,7 @@ module tb_bist;
                     // complete (tx_state returns to TX_IDLE=2'd0) so recv_word starts
                     // scanning during the inter-word gap, not inside an active word.
                     to_w0_08 = 0;
-                    while (dut.u_stream_tx.tx_state !== 2'd0 && to_w0_08 < 30) begin
+                    while (dut.live_capture.u_stream_tx.tx_state !== 2'd0 && to_w0_08 < 30) begin
                         @(posedge sclk);
                         to_w0_08 = to_w0_08 + 1;
                     end
@@ -594,7 +594,7 @@ module tb_bist;
                     // Continuous-stream contract: the initial arm remains
                     // asserted across ASIC frame boundaries. TELEM_EN=0 is
                     // the only normal stop mechanism.
-                    if (!dut.u_stream_tx.arm) begin
+                    if (!dut.live_capture.u_stream_tx.arm) begin
                         $display("    [FAIL] Frame[%0d]: continuous stream unexpectedly disarmed",
                                  frame08);
                         fail_cnt = fail_cnt + 1;
@@ -609,7 +609,7 @@ module tb_bist;
         // The existing SPI stop is the explicit close/re-arm boundary.
         spi_cmd(8'h02, 8'h00);
         repeat(4) @(posedge sclk);
-        chk1("TC-BIST-08 stop: arm cleared by TELEM_EN=0", dut.u_stream_tx.arm, 1'b0);
+        chk1("TC-BIST-08 stop: arm cleared by TELEM_EN=0", dut.live_capture.u_stream_tx.arm, 1'b0);
 
         // ==================================================================
         // TC-BIST-09  ctrl_reg[2] TEST_SIG_EN: amp enabled and a 625 Hz square wave
