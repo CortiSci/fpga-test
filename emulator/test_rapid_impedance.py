@@ -1,9 +1,8 @@
-"""Exercise all 64 consecutive impedance positions without a 10 ms dwell delay.
+"""Exercise all 64 consecutive impedance positions with tail-owned dwell timing.
 
 Uses the protocol runner's injector/decoder; reports command RTT separately.
 """
 import argparse
-import os
 from pathlib import Path
 import statistics
 import time
@@ -16,12 +15,7 @@ def main():
     ap.add_argument('--exe', required=True)
     ap.add_argument('--fixture', type=Path, help='directory from make_emulator_impedance_example.py')
     args = ap.parse_args()
-    base = f'IONM_RAPID_{os.getpid()}'
-    # Isolate this run from interactive emulator sessions.
-    original_init = dx.PipeClient.__init__
-    def init(self):
-        original_init(self, base)
-    dx.PipeClient.__init__ = init
+    # run_inject owns the unique endpoint name and passes it to both peers.
     dx.INJECT_ROWS = list(range(64))
     dx.INJECT_LANES = [0, 1]
     dx.INJECT_FRAMES = 4
@@ -35,7 +29,7 @@ def main():
     dx.PipeClient.do_cmd = timed
     # Stop's acknowledged command consumes preceding telemetry. No extra wait.
     dx.Host.drain = lambda self, quiet_s: 0
-    emu_args = ['-pipe', base]
+    emu_args = []
     expected = {}
     if args.fixture:
         emu_args += ['-if', str((args.fixture/'impedance-example.dat').resolve()), '-loop']
