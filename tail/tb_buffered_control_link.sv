@@ -6,16 +6,23 @@ module tb_buffered_control_link;
     integer passes=0;
     always #24.414 clk=~clk;
 `ifdef PULL_LINK
-    localparam MODE=2, CAPABILITIES=31;
+    localparam MODE=2, CAPABILITIES=63;
 `else
     localparam MODE=1, CAPABILITIES=7;
 `endif
+`ifdef PULL_LINK
+    tail_asic_transaction #(.CONTROL_REGISTERS(1)) spi (
+        .clk(clk),.rst_n(rst),.fault(fault),.blocked(1'b0),.sclk(sclk),.ss_n(ss),.mosi(mosi),
+        .asic_miso(1'b0),.response(miso),.controls(controls),.control_toggle(ct),
+        .command_toggle(pet),.clear_toggle(clear));
+`else
     tail_spi_slave #(.EXTENDED_CONTROLS(MODE)) spi (
         .sclk(sclk),.rst_n(rst),.mosi(mosi),.ss_n(ss),.spi_miso_ff(miso),
         .ctrl_reg(controls),.telem_en(),.cs1_pass_set(),.cs2_pass_set(),
         .soft_reset(),.test_en(),.watchdog_fault(fault),.control_toggle(ct),
         .command_toggle(pet),.clear_toggle(clear)
     );
+`endif
     tail_control_bridge #(.WATCHDOG_CYCLES(64)) bridge (
         .clk(clk),.rst_n(rst),.spi_controls(controls),.control_toggle(ct),
         .command_toggle(pet),.word_toggle(1'b0),.clear_toggle(clear),

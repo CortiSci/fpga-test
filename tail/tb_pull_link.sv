@@ -21,9 +21,13 @@ module tb_pull_link;
         if (srcword==0) srcframe++;
     end
     wire [31:0] drops;
-    wire toggle;
+    wire toggle, release_frame, reset_epoch;
+    tail_asic_transaction #(.CONTROL_REGISTERS(1)) commands(
+        .clk(tailclk),.rst_n(rst_n),.fault(1'b0),.blocked(1'b1),
+        .sclk(tailclk),.ss_n(tailss),.mosi(tailmosi),.asic_miso(1'b0),
+        .release_frame(release_frame),.reset_epoch(reset_epoch));
     asic_pull_tx tail(roclk,rst_n,data,frame,tailclk,1'b1,1'b0,1'b0,
-                      tailmosi,tailss,pre,drops,toggle);
+                      tailmosi,tailss,pre,drops,toggle,release_frame,reset_epoch);
     reg injected=0;
     always @(posedge tailclk) begin
         miso_ff<=pre;

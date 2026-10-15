@@ -38,7 +38,7 @@ module tb_buffered_capture;
     endtask
     task send(input integer id,input integer words);
         for(integer i=0;i<words*(impedance?2:1);i++) begin
-            @(negedge wc); frame=(i<2); data=sample(id,i);
+            @(negedge wc); frame=(i%1024<2); data=sample(id,i);
         end
         @(negedge wc); frame=0;
     endtask

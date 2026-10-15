@@ -29,13 +29,17 @@ module tb_pull_throughput;
     wire [15:0] data[0:3];
     genvar i;
     generate for(i=0;i<4;i=i+1) begin: link
-        wire ss,mosi,pre;
+        wire ss,mosi,pre,release_frame,reset_epoch;
+        tail_asic_transaction #(.CONTROL_REGISTERS(1)) commands(
+            .clk(clk),.rst_n(rst_n),.fault(1'b0),.blocked(1'b1),
+            .sclk(~clk),.ss_n(ss),.mosi(mosi),.asic_miso(1'b0),
+            .release_frame(release_frame),.reset_epoch(reset_epoch));
         reg miso=0;
         if(i<3) begin: present
             asic_pull_tx tail(.ro1_clk(roclk),.rst_n(rst_n),.ro1_sd({2'(i),source_data}),
                 .ro1_frame(source_frame),.sclk(~clk),.telem_en(1'b1),.imp_en(1'b0),
                 .lane_sel(1'b0),.mosi(mosi),.ss_n(ss),.stream_miso_pre(pre),
-                .dropped_sweeps(),.word_toggle());
+                .dropped_sweeps(),.word_toggle(),.release_frame(release_frame),.reset_epoch(reset_epoch));
             always @(negedge clk) miso<=pre;
         end
         spi_ch_pull rx(.sclk(clk),.rst_n(rst_n),.miso_in(miso),.run(run_mask[i]),
@@ -53,7 +57,7 @@ module tb_pull_throughput;
     wire ci,cv,cl,cdone,txvalid;
     wire [15:0] cdata,txdata;
     wire [31:0] crc;
-    telem_engine_v3 #(.PULL_LINK(1),.CRC_BYTEWISE(1)) engine(
+    telem_engine #(.CRC_BYTEWISE(1)) engine(
         .frame_done(done),.clk(clk),.rst_n(rst_n),.telem_start(start),.sw_reset(1'b0),
         .run_any(1'b1),.ext_frame_cnt(timestamp),.frame_aligned(epoch),
         .tick_req(req),.tick_data_0(td0),.tick_data_1(td1),.tick_data_2(td2),.tick_data_3(td3),

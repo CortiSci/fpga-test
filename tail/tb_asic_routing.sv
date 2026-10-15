@@ -31,7 +31,8 @@ module tb_asic_routing;
         check(dut.local_pending && !dut.telem_active,"stream start held while ASIC configuration pending");
         #39000;
         check(edges==24 && captured==24'h95ac31 && cs0 && cs1,"local ASIC payload reaches board pins");
-        cmd('h0b,0);check(rx==2 && dut.telem_active,"stream becomes eligible only after configuration completes");
+        cmd('h0b,0);check(rx==2 && !dut.telem_active,"configuration completion does not restart acquisition");
+        cmd(2,1);check(dut.telem_active,"explicit start after configuration completes");
         cmd(2,0);check(!dut.telem_active,"stream stop still works");
         // Removed relay opcodes must never select or clock the ASIC.
         cmd(3,0);

@@ -39,7 +39,7 @@ initial begin: local_asic_sequence
     u_ft600q.wait_response_frame_typed(m,f,a,d);
     for(la_channel=0;la_channel<4;la_channel++) begin
         spi_cfg_xact(2'(la_channel),48'h070000000000,3,rx);
-        la_check(rx[31:24]==8'h1f,"local ASIC capability exposed through USB");
+        la_check(rx[31:24]==8'h3f,"local ASIC capability exposed through USB");
         for(la_select=0;la_select<2;la_select++) begin
             la_expected=24'h95ac31 ^ (la_channel<<8) ^ la_select;
             tx={8'h0a,7'b0,la_select[0],la_expected,8'b0};

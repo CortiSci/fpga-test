@@ -7,7 +7,8 @@ module tb_asic_transaction;
     reg [23:0] captured=0, expected=0, reply=24'h96a53c;
     reg expected_cs=0, allow_abort=0;
     real last_rise=0;
-    always #24.414 clk=~clk;
+    reg clock_enabled=1;
+    always #24.414 clk=clock_enabled ? ~clk : 0;
     assign mi=edges<24 ? reply[23-edges] : 0;
     tail_asic_transaction dut(.clk(clk),.rst_n(rst),.fault(fault),.blocked(blocked),
         .sclk(sclk),.ss_n(ss),.mosi(mosi),.asic_miso(mi),.selected(selected),
@@ -61,12 +62,12 @@ module tb_asic_transaction;
         blocked=1;submit(0,0);read(0,stat);check(stat[2] && !stat[0],"stream/relay conflict rejected");blocked=0;
         #20;ss=0;#10;byte_xfer('h0a,ignored);byte_xfer(0,ignored);byte_xfer('h11,ignored);ss=1;
         #40000;check(transactions==2,"truncated command has no side effects");
-        expected_cs=0;expected=24'habcdef;submit(0,expected);#4000;allow_abort=1;fault=1;
+        expected_cs=0;expected=24'habcdef;submit(0,expected);#4000;allow_abort=1;clock_enabled=0;fault=1;
         #200;check(cs==3 && !aclk,"watchdog abort parks ASIC pins");
         read(0,stat);check(stat[3] && !stat[0],"aborted request reported");
         read(1,stat);check(stat==0,"aborted readback not published");
         submit(0,0);read(0,stat);check(stat[2] && !stat[0],"request rejected while faulted");
-        fault=0;allow_abort=0;expected=24'h654321;submit(0,expected);
+        fault=0;clock_enabled=1;allow_abort=0;expected=24'h654321;submit(0,expected);
         #39000;read(0,stat);check(stat==2 && transactions==3,"explicit new request recovers");
         expected=24'h13579b;submit(0,expected);#4000;allow_abort=1;rst=0;
         #100;check(cs==3 && !aclk && !pending,"reset aborts and clears mailbox");rst=1;

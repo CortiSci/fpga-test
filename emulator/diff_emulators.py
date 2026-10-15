@@ -108,6 +108,7 @@ CMD_MAGIC, RESP_MAGIC, FLAG_WRITE = 0xAA55, 0x55AA, 0x0001
 TELEM_WORDS, PHASE_IDX, CRC_IDX = 4105, 4099, 4103
 REG_SPI_ENABLE_MASK = 0x0002
 REG_SPI_CFG_DATA, REG_SPI_CFG_CTRL, REG_SPI_CFG_DATA2 = 0x0030, 0x0031, 0x0032
+REG_SPI_CFG_DATA3 = 0x0033
 REG_SPI_CFG_RD01, REG_SPI_CFG_RD23, REG_SPI_CFG_RD45 = 0x0034, 0x0035, 0x0036
 REG_SPI_CLK_DIV = 0x0060
 REG_ACQ_ALL_RUN = 0x0140
@@ -317,6 +318,8 @@ class Host:
         self.p.write_reg(REG_SPI_CFG_DATA, (tx[0] << 8) | tx[1], self.t, self.stray)
         if n_bytes > 2:
             self.p.write_reg(REG_SPI_CFG_DATA2, (tx[2] << 8) | tx[3], self.t, self.stray)
+        if n_bytes > 4:
+            self.p.write_reg(REG_SPI_CFG_DATA3, (tx[4] << 8) | tx[5], self.t, self.stray)
         ctrl = ((n_bytes & 7) << N_BYTES_SHIFT) | SPI_GO | (0 if want_rx else SPI_RW) | (ch & 3)
         self.p.write_reg(REG_SPI_CFG_CTRL, ctrl, self.t, self.stray)
         for _ in range(100000):
@@ -355,8 +358,22 @@ class Host:
 
     # ---- the impedance sweep's ASIC writes (CannedFunctions::asicPassthroughWrite) ----
     def asic_write(self, ch: int, cs_pass_op: int, word: list[int]) -> None:
-        self.spi_xact(ch, 2, [cs_pass_op, 0], True)      # arm the passthrough (read mode keeps the trailing clocks)
-        self.spi_xact(ch, 3, word, False)                # the 24-bit word, write mode -> exactly 24 SCLKs
+        if self.spi_xact(ch, 3, [8, 0, 0], True)[2] & 1:
+            self.spi_xact(ch, 2, [9, 0xa5], False)
+            self.spi_xact(ch, 2, [TAIL_CTRL, CTRL_RUN], False)
+        self.spi_xact(ch, 2, [TAIL_TELEM_EN, 0], False)
+        self.spi_xact(ch, 5, [0x0a, cs_pass_op - 3] + word, False)
+        for _ in range(100):
+            status = self.spi_xact(ch, 3, [0x0b, 0, 0], True)[2]
+            if status == 2:
+                for other in range(4):
+                    if other != ch:
+                        self.tail_ping(other)
+                return
+            if status & 12:
+                raise RuntimeError(f"ASIC command rejected/aborted: {status:#x}")
+            time.sleep(0.001)
+        raise RuntimeError("ASIC command completion timeout")
 
     def drain(self, quiet_s: float) -> int:
         n = 0
@@ -749,44 +766,38 @@ def run_inject(name: str, exe: Path, args: list[str], first_frame_timeout: float
         if first is None:
             res.error = "no telemetry frame after bring-up"
             return res, meas
+        for ch in range(4):
+            host.spi_xact(ch, 2, [TAIL_TELEM_EN, 0], False)
         for lane in INJECT_LANES:
-            prev_row = None
             for row in INJECT_ROWS:
                 for ch in range(4):
-                    if prev_row is None:
-                        host.spi_xact(ch, 2, [TAIL_TELEM_EN, inject_mode(lane)], False)    # the mode for this lane's parity
-                        host.asic_write(ch, TAIL_CS1_PASS, [0x50, 0x4E, lane & 0x0F])     # Global: Mode-1 clocks, PSLICE = lane
-                        for _ in range(64):
-                            host.asic_write(ch, TAIL_CS2_PASS, PIX_OFF)                   # clear the chain
-                        host.asic_write(ch, TAIL_CS2_PASS, PIX_INJECT)                    # the injecting word
-                        for _ in range(row):
-                            host.asic_write(ch, TAIL_CS2_PASS, PIX_OFF)
-                    else:
-                        for _ in range(row - prev_row):
-                            host.asic_write(ch, TAIL_CS2_PASS, PIX_OFF)                   # advance one row
-                prev_row = row
-                host.stray.clear()
-                pipe.write_reg(REG_ACQ_ALL_RUN, 0x000F, cmd_timeout, host.stray)
-                payloads: list[bytes] = list(host.stray)
-                tmo = first_frame_timeout
-                while len(payloads) < INJECT_FRAMES:
-                    m = pipe.next_frame(tmo)
-                    if m is None:
-                        break
-                    payloads.append(m)
-                    tmo = frame_timeout
-                host.stop()
-                host.drain(1.0)
-                frames = [Frame.parse(p) for p in payloads]
-                res.frames.extend(frames)
-                for ch in range(4):
+                    host.asic_write(ch, TAIL_CS1_PASS, [0x50, 0x4e, lane])
+                    host.spi_xact(ch, 5, [0x0c, row, inject_mode(lane), 0, 10], False)
+                    host.stray.clear()
+                    pipe.write_reg(REG_ACQ_ALL_RUN, 1 << ch, cmd_timeout, host.stray)
+                    payloads = list(host.stray)
+                    while len(payloads) < INJECT_FRAMES:
+                        m = pipe.next_frame(first_frame_timeout if not payloads else frame_timeout)
+                        if m is None:
+                            break
+                        payloads.append(m)
+                    host.stop()
+                    deadline = time.monotonic() + 30
+                    while True:
+                        status = host.spi_xact(ch, 3, [0x0b, 0, 0], True)[2]
+                        if status == 2:
+                            break
+                        if status & 12 or time.monotonic() > deadline:
+                            raise RuntimeError(f"Measurement did not complete: {status:#x}")
+                        time.sleep(0.001)
+                    host.drain(0.05)
+                    frames = [Frame.parse(p) for p in payloads]
+                    res.frames.extend(frames)
                     meas[(ch, lane, row)] = measure_pixel(frames, ch, lane)
                     if meas[(ch, lane, row)] is None:
-                        # Flaky on CI (~1 dwell in 15, always LEG8, RTL side): say why.
-                        log(f"  [{name}] leg{ch + 5} lane {lane} row {row} unmeasurable -- {describe_dwell(frames, ch, lane)}")
-                log(f"  [{name}] lane {lane} (TELEM_EN {inject_mode(lane)}) row {row}: {len(frames)} frames; " + "  ".join(
-                    f"leg{ch + 5}=" + (f"g{m[0]} swing {m[1]} ({m[2]} smp)" if (m := meas[(ch, lane, row)]) else "none")
-                    for ch in range(4)))
+                        log(f"  [{name}] leg{ch+5} lane {lane} row {row}: {describe_dwell(frames,ch,lane)}")
+                    else:
+                        log(f"  [{name}] leg{ch+5} lane {lane} row {row}: {meas[(ch,lane,row)]}")
         res.n_short = pipe.n_short
     except Exception as e:      # noqa: BLE001 — report, do not crash the other leg
         res.error = f"{type(e).__name__}: {e}"
@@ -834,8 +845,10 @@ def main() -> int:
 
     rel = Path(a.release_dir).resolve()
     sw_exe, rtl_exe = rel / f"ionm_emulator{EXE}", rel / f"ionm_emu_rtl{EXE}"
-    dat, imp = rel / "diff_emulators_pattern.dat", rel / "diff_emulators_imp.dat"
-    dc = rel / "diff_emulators_dc.dat"
+    import tempfile
+    data_dir = Path(tempfile.mkdtemp(prefix="ionm_diff_"))
+    dat, imp = data_dir / "pattern.dat", data_dir / "imp.dat"
+    dc = data_dir / "dc.dat"
     make_pattern_files(dat, imp)
     make_dc_file(dc)
     cell = load_elec_map(ELEC_MAP_H)
@@ -1057,6 +1070,7 @@ def main() -> int:
         dat.unlink(missing_ok=True)
         imp.unlink(missing_ok=True)
         dc.unlink(missing_ok=True)
+        data_dir.rmdir()
 
     n_pass = sum(1 for c in checks if c.ok)
     n_known = sum(1 for c in checks if not c.ok and c.known)
