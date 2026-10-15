@@ -1,142 +1,33 @@
-# fpga-test
+# FPGA tests
 
-Testbenches, behavioural models and simulation scripts for the IONM-A FPGA
-designs. Mounted as a submodule of `IONM-A-FPGA`, which holds the RTL.
+This submodule contains current IONM-A RTL benches, protocol models and host
+emulator checks. The design repository owns RTL and the executable target
+registry in `tools/mcp_fpga_tools/simulation.py`.
 
-The `rev2` branch includes the [Rev 2 verification plan](docs/buffered_tail_test_plan.md)
-for upgraded tails and delegated acquisition work. Buffer ownership, independent
-controls and local watchdog tests are registered; remaining targets are planned.
+History & versioning is for version control. Keep useful behavioral regressions
+on the current DUT; remove retired architectures and historical-only benches.
 
-The split exists so a bench can be run against **any revision of the design**
-without disturbing either checkout — the thing that was painful when both lived
-in one repo.
+From the parent checkout:
 
-## The contract with the design repo
-
-Two roots, resolved separately by the runner (`tools/mcp_fpga_tools/simulation.py`
-in the design repo):
-
-| root | owns | override |
-|---|---|---|
-| `DUT_ROOT` | the design: any path under a `<target>/src/rtl/` directory | `IONM_DUT_ROOT` |
-| `TEST_ROOT` | this repo: benches, models, stubs, task packages, `.do` scripts | `IONM_TEST_ROOT` |
-
-Source paths in target definitions stay written **repo-relative** — e.g.
-`consolidator/tb_board.sv` and
-`consolidator/src/rtl/spi_ch_stream.v` — and are routed to the owning root
-by `_is_dut_path()`. The layout here is FLAT and version-neutral — `consolidator/`, `tail/`,
-`models/`, `tasks/` — not `consolidator/src/sim/`.  The benches are meant to
-run against every implementation of a module regardless of its version, so the
-repo is named after the module, not the revision.  The runner maps its
-repo-relative test paths onto this layout.
-
-### The manifest travels with the design
-
-`rtl_files.f` lives in the **design** repo and is the canonical module list.
-It must be read from the same revision as the RTL it describes: geoff-green
-compiles `small_fifo.v` and `watchdog_con.v`, con_phase does not. Expanding a
-target's RTL list from one revision while taking sources from another silently
-drops or adds modules, and the compile then fails for a reason that has nothing
-to do with the revision under test. `_rebuild_dut_sources()` handles this; do
-not re-introduce a copy of the module list here.
-
-## Running a bench against another branch
-
-```python
-run_simulation("consolidator_identity", rtl_ref="72606e4")
+```powershell
+python tools/ci/run_suite.py --suite rtl --jobs 4 --fail-on-any-failure
+python tools/ci/run_suite.py --suite rtl --simulator mixed --jobs 8 --fail-on-any-failure
 ```
 
-The RTL is materialised from that ref; the benches always come from this
-working tree. It only works where the bench and that revision still share an
-interface — where they do not the compile fails, and **that is the result**.
+There are 55 RTL targets and nine separate host targets. The default full suite
+includes both. Host tests require rebuilt emulators; missing executables are
+reported as skips. The quick profile is a subset for development.
 
-Measured example (2026-09-09), same bench, same tail RTL, consolidator swapped:
+Mixed mode caches compiled Verilator executables for board benches, not test
+results. Cold builds take longer; every invocation reruns scenarios. Four-state
+smoke and unit benches remain on Icarus. See the
+[verification plan](docs/buffered_tail_test_plan.md) for scope and limitations.
 
-```
-con_phase (adopted)     9216 pass / 11 fail
-geoff-green 72606e4    11264 pass /  1 fail
-```
+Boundary tests prefer actual tail and consolidator RTL, `ucsd_asic_model.sv`
+source stimulus and `ft600q_tlm.sv` USB observations. Unit tests isolate public
+protocol boundaries. `consolidator/tb_top.sv` is the common board assembly.
+Questa GUI launchers under `consolidator/scripts/` select the same registry.
 
-## Running the suite locally
-
-The design repo carries the runner; this repo carries the benches.  From the
-design repo root, in a bash shell:
-
-```bash
-export PATH="$PATH:/c/oss-cad-suite/bin"          # APPEND — the suite ships its own python.exe
-PYTHONIOENCODING=utf-8 /c/Python314/python.exe tools/ci/run_suite.py --out out/sim_results.json
-```
-
-All 19 targets take about 90 seconds.  You get a per-target table,
-`sim_results.json` with every target's failure lines, and `out/logs/<target>.log`
-with each vvp transcript.  This is byte-for-byte what GitHub CI runs
-(`.github/workflows/sim.yml`), so a local run is an exact preview.
-
-Two Windows traps worth knowing, both fixed in the driver but easy to reintroduce
-in ad-hoc scripts: `subprocess` with `text=True` decodes vvp output in the
-**locale** codec (cp1252), which throws on these benches' UTF-8 glyphs — always
-pass `encoding="utf-8"`; and the OSS CAD Suite's `bin/` must be *appended* to
-PATH, or its bundled `python.exe` shadows the system interpreter.
-
-Verdict is regression-vs-baseline (`.github/workflows/baseline.json` in the design repo), not
-all-green — see that file's `_comment` and the CLAUDE.md section "Test suite".
-
-## SW emulator vs RTL emulator — `emulator/`
-
-`emulator/diff_emulators.py` is a different kind of test: it streams one sample
-file through both `ionm_emulator.exe` (C++ model) and `ionm_emu_rtl.exe`
-(Verilator RTL), drives both with the same host commands at the named pipe, and
-reports where the decoded results differ — structurally, and as the electrode
-image a host recovers.  Impedance is exercised mode-based (`TELEM_EN=0x02/0x03`).
-`emulator/known_divergences.json` names any understood gaps so only an *unexplained*
-difference turns the run red — empty since 2026-09-09 (42/42 strict), after it
-found and closed six emulator gaps and one tail RTL bug (impedance T0/T1 alignment).
-See `emulator/README.md`.
-
-> **Suite target (2026-09-10):** `emulator_differential` — `HOST_TARGETS` in the design repo's
-> `tools/mcp_fpga_tools/simulation.py`, run by `tools/ci/run_suite.py` next to the Icarus targets
-> (and by `run_simulation("emulator_differential")`).  It is a *host* target: the DUT is the pair
-> of built emulators, so the runner reports **SKIP** (with the reason, never scored as a
-> regression) on the Linux CI runner and wherever `ionm_emulator.exe` / `ionm_emu_rtl.exe`
-> are not built.  Scored with the same `RESULTS:` / `STATUS:` contract as the SV benches.
-
-
-## Test levels — and which to prefer
-
-**Boundary tests** drive one protocol edge and observe another, with production
-RTL in between. `tb_board.sv` / `test_stream_aced.sv` with `RUN_UNIQUE` set the
-ASIC models to a transformed `{frame, sensor, leg}` identity and check
-reconstruction at the USB boundary. These are portable across designs — swap
-the consolidator and rerun unchanged. **Prefer these.**
-
-The system has three modules with defined protocols between them, and there is
-a model for each edge:
-
-| edge | model |
-|---|---|
-| ASIC ↔ Tail | `models/ucsd_asic_model.sv` (`ro1_clk`, `ro1_sd[15:0]`, `ro1_frame`, SPI) |
-| Tail ↔ Consolidator | real RTL both sides in the full-stack benches |
-| Consolidator ↔ Host | `models/ft600q_tlm.sv` |
-
-**Unit benches** poke internal signals (`tb_rotation.sv` reads `dut.wcnt`,
-`w0_dist`, `resync_arm`). They are useful for isolating a defect but are
-**not portable** — they fail to elaborate against a design with a different
-interface. Keep them, but do not treat them as the system guard.
-
-## Toolchain constraints
-
-See `docs/toolchain_compat.md` in the design repo (C-01..C-10). Two that bite
-often here:
-
-* **C-10** — Icarus requires declarations before first *textual* use. Diamond
-  and QuestaSim accept forward references, so RTL verified only through Diamond
-  can fail to elaborate under Icarus.
-* **C-08** — a polling loop `while (dut.sig !== val) @(posedge clk)` exits
-  seeing state[N-1]. Use discard+check for serial-capture tasks.
-
-## Status
-
-The suite is not currently green: both consolidator revisions fail
-`consolidator_identity`, and geoff's own release receipt records
-`single_leg`, `board_unique`, `board_unique_skew` and `tail_reset` as blocking.
-Establish a green baseline before treating a failure here as a regression.
+The runner resolves RTL against `IONM_DUT_ROOT` and tests against
+`IONM_TEST_ROOT`; defaults are the parent checkout and this submodule.
+Git revisions are the source of earlier designs when reproducing a regression.

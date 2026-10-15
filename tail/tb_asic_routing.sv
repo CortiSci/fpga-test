@@ -5,7 +5,7 @@ module tb_asic_routing;
     integer passes=0,edges=0;
     reg [23:0] captured=0;
     always #24.414 clk=~clk;
-    tail_core #(.BUFFERED_CAPTURE(2)) dut (
+    tail_core dut (
         .RO1_SD(16'b0),.RO1_FRAME(1'b0),.RO1_CLK(clk),.RO_RSTn(),
         .SPI_RO_MOSI(am),.SPI_RO_MISO(1'b1),.SPI_RO_SCLK(aclk),
         .SPI_RO_SS0_B(cs0),.SPI_RO_SS1_B(cs1),

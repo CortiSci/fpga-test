@@ -1109,13 +1109,8 @@ task automatic run_IMP_CYCLE();
         ic_cmd(flags_wr(), 16'h0100, 16'h0000, "RUN=0");
         // the tool's asicPassthroughWrite: CS2_PASS then the 3-byte pixel word,
         // then TELEM_EN, mask, RUN — each a register write pair answered in turn
-`ifdef CONSOLIDATOR_PULL_LINK
         cfg_write2(2'd0, 8'h02, 8'h00);                 // stop tail capture before local configuration
         spi_local_asic_write(2'd0,1'b1,24'hc51101);
-`else
-        cfg_write2(2'd0, 8'h04, 8'h00);                 // CS2_PASS
-        cfg_write3(2'd0, 8'hC5, 8'h11, 8'h01);          // Pixel {C5 11 01}
-`endif
         cfg_write2(2'd0, 8'h02, 8'h01);                 // TELEM_EN normal
         ic_cmd(flags_wr(), REG_SPI_EN_MASK, 16'h0009, "SPI_EN_MASK");
         ic_cmd(flags_wr(), 16'h0100, 16'h0001, "RUN=1");
@@ -1432,6 +1427,7 @@ task automatic run_SA_USB_JITTER();
     int          n_fail = 0, n_pass = 0, n_flush, dropped;
     int          frame_no = 0, i, ch, all_clean, window_clean, v;
     int          prev_ph [0:3];
+    bit          prev_unaligned [0:3];
     int          ph_changes [0:3];
     int          n_clean_leg = 0, n_flagged_leg = 0, n_dup = 0, n_skip = 0;
     int          last_cnt, cnt_now, delta, gaps, gap_cycles, gap_words, armed_legs;
@@ -1447,6 +1443,7 @@ task automatic run_SA_USB_JITTER();
     tb_top.tail_ch[3].asic_model.data_mode = MODE_UNIQUE;
     hx_armed_mask  = MASK;
     hx_excuse_mask = 3'b101;        // undf or par excuse; the sticky ovf bit does not
+    for (ch = 0; ch < 4; ch++) prev_unaligned[ch] = 0;
     armed_legs = 0;
     for (ch = 0; ch < 4; ch++) if (MASK[ch]) armed_legs++;
 
@@ -1520,13 +1517,17 @@ task automatic run_SA_USB_JITTER();
                 $display("[SA-USBJITTER] frame[%0d] leg%0d: phase %0d -> %0d (delta %0d groups)%s",
                          frame_no, ch, prev_ph[ch], hx_phase[ch] & 16'h03FF,
                          (prev_ph[ch] < 64) ? (((hx_phase[ch] & 16'h03FF) - prev_ph[ch]) & 63) : -1,
-                         hx_phase[ch][12] ? "" : "  <-- UNFLAGGED");
-                if (!hx_phase[ch][12]) begin
+                         (hx_phase[ch][12] || prev_unaligned[ch]) ? "" : "  <-- UNFLAGGED");
+                // Match the dead-leg checker: an explicitly unaligned/flagged
+                // preceding frame announces recovery. Current payload must still
+                // pass hx_judge_leg; this never excuses corrupt clean data.
+                if (!hx_phase[ch][12] && !prev_unaligned[ch]) begin
                     n_fail++;
                     $display("[SA-USBJITTER] FAIL frame[%0d] leg%0d: alignment changed without the undf flag — the host displays a frame that is half old, half new alignment", frame_no, ch);
                 end else n_pass++;
                 prev_ph[ch] = hx_phase[ch] & 16'h03FF;
             end
+            prev_unaligned[ch] = ((hx_phase[ch] & 16'h03FF) == 1023) && hx_phase[ch][12];
         end
     end
     tb_top.u_ft600q.set_txe_random_backpressure(1'b0, 0, 0, 0);

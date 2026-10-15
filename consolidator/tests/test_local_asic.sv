@@ -11,7 +11,7 @@ endtask
 genvar la_g;
 generate for(la_g=0;la_g<4;la_g++) begin: local_pin_monitor
     initial begin la_edges[la_g]=0;la_done[la_g]=0;la_seen[la_g]=0;la_reply[la_g]=0;end
-    always @(posedge spi_ro_sclk[la_g]) begin
+    always @(posedge spi_ro_sclk[la_g]) if (devrst_n) begin
         la_check(la_channel==la_g,"ASIC clocks routed only to selected tail");
         la_check({spi_ro_ss1[la_g],spi_ro_ss0[la_g]}==(la_select ? 2'b01:2'b10),"ASIC selector delivered");
         la_seen[la_g]={la_seen[la_g][22:0],spi_ro_mosi[la_g]};la_edges[la_g]++;

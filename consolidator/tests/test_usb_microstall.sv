@@ -1,12 +1,7 @@
 // USB stall regression: real board acquisition path and FT600 backpressure.
-// The original 512-word CDC dipped at 64--96 us. The 2026-09-19 buffer fix
-// increases it to 2048 words while retaining early whole-frame admission.
-// Require the previously failing 96 us idle and 64 us near-ceiling pauses to
-// be absorbed. A 256 us idle stall and 300 us ceiling prefill still exceed
-// finite buffering and must exercise flagged loss, then clean recovery.
-// Ordered data/right-or-flagged, phase changes and counter monotonicity remain
-// checked throughout. This is the existing extended board test, not the new
-// short recorded-deficit reproducer.
+// Short pauses must preserve valid payloads. A 3 ms stall exceeds complete-bank
+// buffering and must produce an observable timestamp gap, then clean recovery.
+// Every received payload remains subject to the right-or-flagged oracle.
 `ifdef RUN_USB_MICROSTALL
 `ifndef MICROSTALL_MASK
 `define MICROSTALL_MASK 4'h9
@@ -129,13 +124,11 @@ task automatic run_SA_USB_MICROSTALL();
     end else begin
         n_fail++; $display("[MS-01] FAIL from idle a %0d us stall already dips (tolerance %0d us, expected >= %0d us)", first_dip_us, tol_us, ABSORB_MIN_US);
     end
-    if (dip_overflow_flagged > 0 && dip_overflow_pairs > 0) begin
-        n_pass++; $display("[MS-02] PASS a 256 us stall dips, and the legs dip TOGETHER (%0d flagged leg-frames, %0d paired frame(s)) -- the recording's signature", dip_overflow_flagged, dip_overflow_pairs);
+    if (dip_overflow_flagged == 0) begin
+        n_pass++; $display("[MS-02] PASS 256 us pause preserves complete-bank payloads");
     end else begin
-        n_fail++; $display("[MS-02] FAIL a 256 us stall: %0d flagged leg-frames, %0d paired (expected a paired dip)", dip_overflow_flagged, dip_overflow_pairs);
+        n_fail++; $display("[MS-02] FAIL 256 us pause damaged payloads");
     end
-    $display("[SA-MICROSTALL] idle tolerance %0d us, first dip at %0d us", tol_us, first_dip_us);
-
     // ---- phase C: at the ceiling -------------------------------------------
     // Begin with an over-capacity stall, then verify short pauses are absorbed
     // even with the same near-ceiling FT600 drain used by the original test.
@@ -143,18 +136,18 @@ task automatic run_SA_USB_MICROSTALL();
     last_cnt = tb_top.u_ft600q.v3_count_lo;
     for (ch = 0; ch < 4; ch++) if (MASK[ch]) ms_prev_ph[ch] = hx_phase[ch] & 16'h03FF;
     tb_top.u_ft600q.set_txe_backpressure(1'b1);
-    #300_000;
+    #3_000_000;
     tb_top.u_ft600q.set_txe_backpressure(1'b0);
     tb_top.u_ft600q.set_txe_drain_limit(158, 2048);
     // the gap's own dip settles first
-    ms_observe(4, MASK, frame_no, n_pass, n_fail, last_cnt, flagged, pairs, skips, dups, unfl, seen);
-    if (flagged > 0 && pairs > 0) begin
-        n_pass++; $display("[MS-07] PASS 300 us stall still exercises paired flagged loss");
+    ms_observe(12, MASK, frame_no, n_pass, n_fail, last_cnt, flagged, pairs, skips, dups, unfl, seen);
+    if (skips > 0) begin
+        n_pass++; $display("[MS-07] PASS 3 ms stall exercises observable whole-frame loss");
     end else begin
-        n_fail++; $display("[MS-07] FAIL over-capacity stall did not exercise flagged loss");
+        n_fail++; $display("[MS-07] FAIL over-capacity stall did not produce a timestamp gap");
     end
     c_dups += dups; c_unfl += unfl;
-    $display("[SA-MICROSTALL] ceiling: the 300 us gap itself: %0d flagged leg-frame(s), %0d paired, counter skipped %0d", flagged, pairs, skips);
+    $display("[SA-MICROSTALL] ceiling: the 3 ms gap itself: %0d flagged leg-frame(s), %0d paired, counter skipped %0d", flagged, pairs, skips);
     for (i = 0; i < CEIL_FRAMES / 2; i++) begin
         int len_us;
         len_us = (i % 2 == 0) ? HICCUP_US : LONG_HICCUP_US;

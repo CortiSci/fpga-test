@@ -17,7 +17,9 @@ module pll_48m (
     reg reference_alive = 0;
     reg [3:0] lock_edges = 0;
     realtime last_transition = 0;
-    always @(clki) last_transition = $realtime;
+    // Explicit edge sensitivity keeps compiled simulators from treating this
+    // timestamp-only assignment as combinational logic and evaluating it once.
+    always @(posedge clki or negedge clki) last_transition = $realtime;
     always #15 reference_alive = ($realtime - last_transition < 22.5);
     always @(posedge clki or posedge reset or negedge reference_alive)
         if (reset || !reference_alive) lock_edges <= 0;

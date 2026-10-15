@@ -7,10 +7,27 @@ module tb_usb_packetization;
     always #10 clk=~clk;
     always #7.5 usb_clk=~usb_clk;
     reg [3:0] live=4'hb;
-    reg [3:0] wd_valid=0;
-    reg [15:0] wd0=0, wd1=0, wd2=0, wd3=0;
-    integer source_words=0, divider=0;
+    reg roclk=0;
+    always #195.3125 roclk=~roclk;
+    reg [9:0] source_pos=0;
+    reg [5:0] source_bank=0;
+    reg source_frame=0;
+    reg [15:0] source_data=0;
+    wire [31:0] source_words={source_bank,source_pos};
+    always @(negedge roclk) if(rst_n) begin
+        source_frame=source_pos==0;
+        source_data={source_bank,source_pos};
+        source_pos=source_pos+1'b1;
+        if(source_pos==0) source_bank=source_bank+1'b1;
+    end
+    reg [14:0] timer=0;
+    reg [28:0] frame_count=0;
     reg epoch=0;
+    always @(posedge clk) if(rst_n) begin
+        epoch<=timer==19999;
+        if(timer==19999) begin timer<=0;frame_count<=frame_count+1'b1;end
+        else timer<=timer+1'b1;
+    end
     // Exercise the problematic packet phase without simulating 32 sweeps.
     // Queue a 240-word prefix at the public TX FIFO input before acquisition;
     // USB packet boundaries need not coincide with telemetry frame boundaries.
@@ -18,7 +35,6 @@ module tb_usb_packetization;
     reg prefix_valid=0, source_enabled=0;
     integer prefix_sent=0, prefix_received=0;
     wire rd_en,wr_n,rd_n,oe_n,pop;
-    wire [28:0] frame_count=source_words/1024;
     wire tick_req,tick_valid;
     wire [15:0] td0,td1,td2,td3;
     wire [3:0] undf,fill,full,empty,ovf,ovf_pulse,rd_mask,resync;
@@ -32,24 +48,49 @@ module tb_usb_packetization;
     integer ch,tick,base_seq=0,current_count=0;
     reg [31:0] checksum=32'hffffffff;
 
+    wire [3:0] run_mask=source_enabled ? live : 4'b0;
+    wire [3:0] frame_done,source_valid,anchored,flush,parity_errors,gaps_unused;
+    wire [15:0] source_word[0:3];
+    genvar i;
+    generate for(i=0;i<4;i=i+1) begin: link
+        wire ss,mosi,pre,release_frame,reset_epoch;
+        tail_asic_transaction #(.CONTROL_REGISTERS(1)) commands(
+            .clk(clk),.rst_n(rst_n),.fault(1'b0),.blocked(1'b1),
+            .sclk(~clk),.ss_n(ss),.mosi(mosi),.asic_miso(1'b0),
+            .release_frame(release_frame),.reset_epoch(reset_epoch));
+        reg miso=0;
+        if(i!=2) begin: present
+            asic_pull_tx tail(.ro1_clk(roclk),.rst_n(rst_n),.ro1_sd((source_data ^ (16'h4000*i))),
+                .ro1_frame(source_frame),.sclk(~clk),.telem_en(1'b1),.imp_en(1'b0),
+                .lane_sel(1'b0),.mosi(mosi),.ss_n(ss),.stream_miso_pre(pre),
+                .dropped_sweeps(),.word_toggle(),.release_frame(release_frame),.reset_epoch(reset_epoch));
+            always @(negedge clk) miso<=pre;
+        end
+        spi_ch_pull rx(.sclk(clk),.rst_n(rst_n),.miso_in(miso),.run(run_mask[i]),
+            .cfg_hold(1'b0),.resync_req(resync[i]|ovf_pulse[i]),.frame_done(frame_done[i]),
+            .fifo_count(counts[5*i+:5]),.sclk_d1(),.mosi_out(mosi),.ss_n_out(ss),
+            .word_data(source_word[i]),.word_valid(source_valid[i]),.raw_word_done(),
+            .par_err_flag(parity_errors[i]),.source_gap(gaps_unused[i]),.phase_known(anchored[i]),
+            .anchor_flush(flush[i]),.miso_reg());
+    end endgenerate
     leg_quad_fifo fifo(
-        .clk(clk),.rst_n(rst_n),.sync_rst(1'b0),
-        .wd_data_0(wd0),.wd_data_1(wd1),.wd_data_2(wd2),.wd_data_3(wd3),.wd_valid(wd_valid),
+        .clk(clk),.rst_n(rst_n),.sync_rst(start),
+        .wd_data_0(source_word[0]),.wd_data_1(source_word[1]),.wd_data_2(source_word[2]),.wd_data_3(source_word[3]),.wd_valid(source_valid),
         .tick_req(tick_req),.tick_data_0(td0),.tick_data_1(td1),.tick_data_2(td2),.tick_data_3(td3),
         .tick_valid(tick_valid),.tick_undf(undf),.fill_ge4(fill),.fifo_full(full),.fifo_empty(empty),
         .fifo_ovf(ovf),.fifo_word_cnt(counts),.ovf_pulse(ovf_pulse),
-        .ch_local_rst(4'b0),.rd_mask(rd_mask),.flush(4'b0));
-    telem_engine_v3 engine(
+        .ch_local_rst(4'b0),.rd_mask(rd_mask),.flush(flush));
+    telem_engine engine(.frame_done(frame_done),
         .clk(clk),.rst_n(rst_n),.telem_start(start),.sw_reset(1'b0),.run_any(1'b1),
         .ext_frame_cnt(frame_count),.frame_aligned(epoch),
         .tick_req(tick_req),.tick_data_0(td0),.tick_data_1(td1),.tick_data_2(td2),.tick_data_3(td3),
         .tick_valid(tick_valid),.tick_undf(undf),.fill_ge4(fill),
-        .leg_anchored(live),.leg_empty(empty),.legs_armed(live),.rd_mask(rd_mask),.leg_resync(resync),
+        .leg_anchored(anchored),.leg_empty(empty),.legs_armed(live),.rd_mask(rd_mask),.leg_resync(resync),
         .crc_init(crc_init),.crc_valid(crc_valid),.crc_last(crc_last),.crc_data(crc_data),
         .crc_result(crc_result),.crc_result_valid(crc_done),
         .telem_tx_data(tx_data),.telem_tx_valid(tx_valid),.telem_tx_ready(tx_ready),
         .drop_frame(cdc_half),
-        .par_err_in(4'b0),.ovfl_in(ovf),.framer_busy(busy));
+        .par_err_in(parity_errors),.ovfl_in(ovf),.framer_busy(busy));
     crc32 crc(.clk(clk),.rst_n(rst_n),.init(crc_init),.valid(crc_valid),.last(crc_last),
               .data_in(crc_data),.crc_out(crc_result),.crc_valid(crc_done));
     assign tx_ready=~cdc_almost;
@@ -62,25 +103,6 @@ module tb_usb_packetization;
         .rd_clk(usb_clk),.rd_rst_n(rst_n),.rd_data(fifo_data),.rd_en(pop && !cdc_empty),
         .rd_empty(cdc_empty),.rd_level(rd_level));
 
-    // Preserve the physical 2.56 Mword/s source at a 50 MHz fabric clock:
-    // 32 words per 625 cycles. Word identity
-    // encodes the sequence and leg, so dropped/repeated/interleaved words cannot
-    // accidentally pass a constant-pattern comparison.
-    always @(negedge clk) begin
-        if (!rst_n) begin source_words=0; divider=0; wd_valid=0; epoch=0; end
-        else if (source_enabled) begin
-            wd_valid=0; epoch=0;
-            divider=divider+32;
-            if (divider>=625) begin
-                divider=divider-625;
-                wd0=source_words; wd1=source_words ^ 16'h4000;
-                wd2=source_words ^ 16'h8000; wd3=source_words ^ 16'hc000;
-                wd_valid=live;
-                epoch=(source_words % 1024)==0;
-                source_words=source_words+1;
-            end
-        end
-    end
     always @(posedge clk) if (rst_n && prefix_valid && !cdc_full)
         prefix_sent <= prefix_sent+1;
     wire launch_clk; assign #2.5 launch_clk=usb_clk;

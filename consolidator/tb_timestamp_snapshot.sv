@@ -10,13 +10,13 @@ module tb_timestamp_snapshot;
     wire req,valid,ci,cv,cl,cdone,busy;
     wire [15:0] data,cdata;
     wire [31:0] crc;
-    reg tv=0;
+    reg tv=0, epoch=0;
     reg [15:0] sample=0;
     integer next_sample=0,pos=0,frames=0,errors=0,passes=0,failures=0;
     reg [28:0] observed=0,expected=0;
     reg [31:0] check_crc=32'hffffffff;
-    telem_engine_v3 dut(.clk(clk),.rst_n(rst_n),.telem_start(start),
-      .sw_reset(reset_frame),.run_any(1'b1),.ext_frame_cnt(timer),.frame_aligned(1'b0),
+    telem_engine dut(.clk(clk),.rst_n(rst_n),.telem_start(start),
+      .sw_reset(reset_frame),.run_any(1'b1),.ext_frame_cnt(timer),.frame_aligned(epoch),
       .tick_req(req),.tick_data_0(sample),.tick_data_1(16'b0),.tick_data_2(16'b0),.tick_data_3(16'b0),
       .tick_valid(tv),.tick_undf(4'b0),.fill_ge4(4'b1),.leg_anchored(4'b1),.leg_empty(empty),
       .legs_armed(4'b1),.rd_mask(),.leg_resync(),.crc_init(ci),.crc_valid(cv),.crc_last(cl),
@@ -57,11 +57,13 @@ module tb_timestamp_snapshot;
       if(ok)begin passes++;$display("[TIMESTAMP] PASS %s",label);end
       else begin failures++;$display("[TIMESTAMP] FAIL %s observed=%h expected=%h errors=%0d",label,observed,expected,errors);end
     endtask
-    task automatic begin_case(input [28:0] count,input bit blocked);
-      @(negedge clk);reset_frame=1;ready=!blocked;empty=4'he;
+    task automatic begin_case(input [28:0] count,input bit blocked,input bit available=1);
+      @(negedge clk);epoch=0;reset_frame=1;ready=!blocked;empty=available ? 4'he : 4'hf;
       @(negedge clk);reset_frame=0;start=1;timer=count;expected=count;
       pos=0;frames=0;errors=0;observed=0;
       @(negedge clk);start=0;
+      @(negedge clk);epoch=1;
+      @(negedge clk);epoch=0;
     endtask
     task automatic finish_case(input string label);
       wait(frames==1);
@@ -74,6 +76,8 @@ module tb_timestamp_snapshot;
       // No restart between these two frames: normal S_GAP must invalidate
       // the snapshot, and a real timer jump must not become a sequence count.
       @(negedge clk);timer=60;expected=60;
+      repeat(5)@(negedge clk);epoch=1;
+      @(negedge clk);epoch=0;
       wait(frames==2);
       check(observed===expected,"consecutive frame resamples live timer, including genuine elapsed ticks");
       check(errors==0,"consecutive frame payload continuity and CRC");
@@ -93,8 +97,9 @@ module tb_timestamp_snapshot;
       repeat(4)@(negedge clk);
       // Abort an admitted but uncommitted frame; stale snapshot must not leak.
       begin_case(29'd90,0);finish_case("restart invalidates uncommitted timestamp");
-      begin_case(29'd100,1);empty=4'hf;
-      repeat(4)@(negedge clk);timer=101;expected=101;empty=4'he;
+      begin_case(29'd100,1,0);
+      repeat(4)@(negedge clk);timer=101;expected=101;empty=4'he;epoch=1;
+      @(negedge clk);epoch=0;
       repeat(4)@(negedge clk);timer=102;ready=1;
       finish_case("silent-leg wait captures only when anchored data becomes available");
       $display("RESULTS: %0d passed, %0d failed",passes,failures);

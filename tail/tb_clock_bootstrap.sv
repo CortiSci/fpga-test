@@ -7,7 +7,7 @@ module tb_clock_bootstrap;
     reg [15:0] received;
     reg parity;
     always #24.414 osc=~osc;
-    tail_core #(.BUFFERED_CAPTURE(2)) dut (
+    tail_core dut (
       .RO1_SD(16'b0),.RO1_FRAME(1'b0),.RO1_CLK(board_clk),.RO_RSTn(ro),
       .SPI_RO_MOSI(),.SPI_RO_MISO(1'b0),.SPI_RO_SCLK(),.SPI_RO_SS0_B(),.SPI_RO_SS1_B(),
       .FPGA_SPI_MOSI(mosi),.FPGA_SPI_MISO(miso),.FPGA_SPI_SCLK(sclk),.FPGA_SPI_SS(ss),
